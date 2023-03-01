@@ -2,23 +2,21 @@ version: "3.6"
 services:
     www:
         build: .
-        ports: 
-            - "8001:80"
         volumes:
             - ./www:/var/www/html/
-        links:
-            - db
+        labels:
+            - "traefik.enable=true"
+            - "traefik.http.routers.webserver.rule=Host(`website.localhost`)"
+            - "traefik.http.routers.webserver.tls=true"
         networks:
-            - default
+            mynet:
     db:
         image: mysql:5.7
-        ports: 
-            - "3306:3306"
         environment:
             MYSQL_DATABASE: myDb
             MYSQL_USER: user
             MYSQL_PASSWORD: test
-            MYSQL_ROOT_PASSWORD: test 
+            MYSQL_ROOT_PASSWORD: test
         command: --default-authentication-plugin=mysql_native_password
         volumes:
             - ./dump:/docker-entrypoint-initdb.d
@@ -26,16 +24,49 @@ services:
             - /etc/timezone:/etc/timezone:ro
             - /etc/localtime:/etc/localtime:ro
         networks:
-            - default
+            mynet:
     phpmyadmin:
         image: phpmyadmin/phpmyadmin
-        links: 
+        links:
             - db:db
-        ports:
-            - 8000:80
         environment:
             MYSQL_USER: user
             MYSQL_PASSWORD: test
-            MYSQL_ROOT_PASSWORD: test 
-volumes:
-    persistent:
+            MYSQL_ROOT_PASSWORD: test
+            # PMA_ARBITRARY: 1 #Wenn gesetzt kann man vor dem Login zuerst die DB auswählen
+            PMA_HOST: db
+            PMA_ABSOLUTE_URI: https://phpmyadmin.localhost
+        labels:
+            - "traefik.enable=true"
+            - "traefik.http.routers.phpmyadmin.rule=Host(`phpmyadmin.localhost`)"
+            - "traefik.http.routers.phpmyadmin.tls=true"
+        networks:
+            mynet:
+    traefik:
+        image: "traefik:latest"
+        command:
+            - --log.level=DEBUG
+            - --entrypoints.web.address=:80
+            - --entrypoints.web-secure.address=:443
+            - --serverstransport.insecureskipverify=true
+        ports:
+            - "80:80"
+            - "8080:8080"
+            - "443:443"
+        volumes:
+            - "/var/run/docker.sock:/var/run/docker.sock:ro"
+            - "./traefik/config/static.yml:/etc/traefik/traefik.yml:ro"
+            - "./traefik/config/dynamic.yml:/etc/traefik/dynamic.yml:ro"
+            - "./traefik/certs:/etc/certs:ro"
+        networks:
+            mynet:
+                aliases:
+                    - website.localhost
+                    - phpmyadmin.localhost
+networks:
+    mynet:
+        driver: bridge
+        ipam:
+            driver: default
+            config:
+                - subnet: 192.168.159.0/24

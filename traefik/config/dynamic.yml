@@ -1,0 +1,23 @@
+http:
+  routers:
+    traefik:
+      rule: "Host(`traefik.localhost`)"
+      service: "api@internal"
+      tls:
+        domains:
+          - main: "mbsmoodle.localhost"
+            sans:
+              - "*.mbsmoodle.localhost"
+          - main: "mbsmoodle2.localhost"
+            sans:
+              - "*.mbsmoodle2.localhost"
+          - main: "teachshare.localhost"
+            sans:
+              - "*.teachshare.localhost"
+          - main: "phpmyadmin.localhost"
+            sans:
+              - "*.phpmyadmin.localhost"
+tls:
+  certificates:
+    - certFile: "/etc/certs/local-cert.pem"
+      keyFile: "/etc/certs/local-key.pem"
