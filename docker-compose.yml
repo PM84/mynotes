@@ -4,6 +4,8 @@ services:
         build: .
         volumes:
             - ./www:/var/www/html/
+        environment:
+            UPLOAD_LIMIT: 64M
         labels:
             - "traefik.enable=true"
             - "traefik.http.routers.webserver.rule=Host(`website.localhost`)"
