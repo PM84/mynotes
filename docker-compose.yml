@@ -13,7 +13,7 @@ services:
         networks:
             mynet:
     db:
-        image: mysql:5.7
+        image: mysql:latest
         environment:
             MYSQL_DATABASE: myDb
             MYSQL_USER: user
@@ -38,6 +38,7 @@ services:
             # PMA_ARBITRARY: 1 #Wenn gesetzt kann man vor dem Login zuerst die DB auswählen
             PMA_HOST: db
             PMA_ABSOLUTE_URI: https://phpmyadmin.localhost
+            UPLOAD_LIMIT: 64M
         labels:
             - "traefik.enable=true"
             - "traefik.http.routers.phpmyadmin.rule=Host(`phpmyadmin.localhost`)"
