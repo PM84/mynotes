@@ -1,5 +1,5 @@
 import { db, type LocalNote, type PendingOp } from "./db";
-import { api, apiJson } from "./api";
+import { api, apiJson, ApiError } from "./api";
 import { v4 as uuid } from "uuid";
 
 export type ServerNote = {
@@ -12,6 +12,7 @@ export type ServerNote = {
   tags: string[] | null;
   created_at: string;
   updated_at: string;
+  deleted_at?: string | null;
 };
 
 const now = () => new Date().toISOString();
@@ -46,6 +47,9 @@ export async function upsertNoteLocal(input: Partial<LocalNote> & { id?: string 
     deleted: 0,
   };
   await db.notes.put(next);
+  // Basisversion zum Zeitpunkt des Edits = vorherige updated_at (existing).
+  // Damit erkennt der Server, ob in der Zwischenzeit ein anderes Gerät gepusht hat.
+  const baseUpdatedAt = existing?.updated_at ?? null;
   await db.pending.add({
     type: "note.upsert",
     payload: {
@@ -58,6 +62,7 @@ export async function upsertNoteLocal(input: Partial<LocalNote> & { id?: string 
         excalidraw: next.excalidraw,
         tags: next.tags,
         asset_ids: next.asset_ids,
+        client_updated_at: baseUpdatedAt,
       },
     },
     created_at: Date.now(),
@@ -130,9 +135,42 @@ export async function trySync() {
   }
 }
 
+let conflictHandler: ((id: string, server: ServerNote) => void) | null = null;
+export function onConflict(fn: (id: string, server: ServerNote) => void) {
+  conflictHandler = fn;
+}
+
 async function runOp(op: PendingOp) {
   if (op.type === "note.upsert") {
-    await apiJson(`/notes/${op.payload.id}`, "PUT", op.payload.data);
+    try {
+      await apiJson(`/notes/${op.payload.id}`, "PUT", op.payload.data);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        // Server hat eine neuere Version. Strategie: Server-wins. Lokale
+        // Änderungen werden durch die Server-Variante ersetzt; der User
+        // bekommt einen Hinweis (per Handler). Anschließend Op droppen,
+        // damit der Push nicht endlos wiederholt wird.
+        const body = (e.body as any) ?? {};
+        const server: ServerNote | undefined = body?.detail?.server;
+        if (server) {
+          await db.notes.put({
+            id: server.id,
+            parent_id: server.parent_id,
+            title: server.title,
+            body_md: server.body_md,
+            excalidraw: server.excalidraw,
+            ocr_text: server.ocr_text,
+            tags: server.tags,
+            updated_at: server.updated_at,
+            dirty: 0,
+            deleted: server.deleted_at ? 1 : 0,
+          });
+          conflictHandler?.(server.id, server);
+        }
+        return;
+      }
+      throw e;
+    }
     const n = await db.notes.get(op.payload.id);
     if (n) {
       n.dirty = 0;
@@ -181,14 +219,32 @@ async function runOp(op: PendingOp) {
 
 window.addEventListener("online", () => void trySync());
 
-// Initial pull aller Top-Level-Notes (wenn online)
-export async function pullTopLevel() {
+// Backwards-Compat-Alias.
+export const pullTopLevel = pullAll;
+
+/**
+ * Vollständiger Pull (rekursiv, inkl. Tombstones).
+ * – Aktualisiert lokal vorhandene Notes, wenn Server neuer ist und lokal
+ *   nichts dirty ist.
+ * – Fügt neue Notes ein.
+ * – Löscht lokale Notes, die der Server als deleted_at meldet (oder die
+ *   nicht mehr in der Liste auftauchen) – sofern lokal nicht dirty.
+ */
+export async function pullAll() {
   if (!navigator.onLine) return;
   try {
-    const remote = await api<ServerNote[]>("/notes");
+    const remote = await api<ServerNote[]>("/notes?all=1&include_deleted=1");
+    const remoteIds = new Set(remote.map((r) => r.id));
     await db.transaction("rw", db.notes, async () => {
       for (const r of remote) {
         const local = await db.notes.get(r.id);
+        const isDeleted = !!r.deleted_at;
+        if (isDeleted) {
+          if (local && !local.dirty) {
+            await db.notes.delete(r.id);
+          }
+          continue;
+        }
         if (!local || (!local.dirty && r.updated_at > local.updated_at)) {
           await db.notes.put({
             id: r.id,
@@ -204,7 +260,16 @@ export async function pullTopLevel() {
           });
         }
       }
+      // Lokale Notes, die der Server gar nicht mehr kennt (weder aktiv noch
+      // deleted): bereinigen, sofern nicht dirty.
+      const all = await db.notes.toArray();
+      for (const local of all) {
+        if (!remoteIds.has(local.id) && !local.dirty) {
+          await db.notes.delete(local.id);
+        }
+      }
     });
+    notify();
   } catch (e) {
     console.warn("pull failed", e);
   }

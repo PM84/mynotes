@@ -11,6 +11,8 @@ from ..db import get_session
 from ..deps import get_current_user, get_default_workspace
 from ..models import Note, NoteAsset, PendingJob, User
 from ..schemas import NoteIn, NoteOut
+from .ws import broadcast_user
+
 router = APIRouter(prefix="/notes", tags=["notes"])
 
 
@@ -25,21 +27,27 @@ def to_out(n: Note) -> NoteOut:
         tags=n.tags,
         created_at=n.created_at,
         updated_at=n.updated_at,
+        deleted_at=n.deleted_at,
     )
 
 
 @router.get("", response_model=list[NoteOut])
 async def list_notes(
     parent_id: uuid.UUID | None = Query(default=None),
+    all: bool = Query(default=False, description="Alle Notes (rekursiv) ausliefern"),
+    include_deleted: bool = Query(default=False),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> list[NoteOut]:
     ws = await get_default_workspace(user, session)
-    q = select(Note).where(Note.workspace_id == ws.id, Note.deleted_at.is_(None))
-    if parent_id is None:
-        q = q.where(Note.parent_id.is_(None))
-    else:
-        q = q.where(Note.parent_id == parent_id.bytes)
+    q = select(Note).where(Note.workspace_id == ws.id)
+    if not include_deleted:
+        q = q.where(Note.deleted_at.is_(None))
+    if not all:
+        if parent_id is None:
+            q = q.where(Note.parent_id.is_(None))
+        else:
+            q = q.where(Note.parent_id == parent_id.bytes)
     rows = (await session.execute(q.order_by(Note.updated_at.desc()))).scalars().all()
     return [to_out(n) for n in rows]
 
@@ -85,9 +93,24 @@ async def upsert_note(
         )
         session.add(n)
     else:
-        # Last-Write-Wins: kein Optimistic-Locking. Für Single-User/Multi-Device-PWA
-        # mit Offline-Queue ist Wall-Clock-Vergleich unzuverlässig (Clock-Skew,
-        # Server-`onupdate=now()` macht queued Edits dauerhaft "stale").
+        # Optimistic-Locking: Wenn der Client eine Basis-Version mitschickt,
+        # die älter ist als die aktuelle Server-Version, ist das ein Konflikt.
+        # Toleranz 1 s gegen Clock-Skew/MariaDB-Timestamp-Granularität.
+        if data.client_updated_at is not None and n.updated_at is not None:
+            base = data.client_updated_at
+            if base.tzinfo is None:
+                base = base.replace(tzinfo=timezone.utc)
+            current = n.updated_at
+            if current.tzinfo is None:
+                current = current.replace(tzinfo=timezone.utc)
+            if (current - base).total_seconds() > 1:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "conflict",
+                        "server": to_out(n).model_dump(mode="json"),
+                    },
+                )
         n.parent_id = data.parent_id.bytes if data.parent_id else None
     n.title = data.title
     n.body_md = data.body_md
@@ -114,7 +137,16 @@ async def upsert_note(
     await _enqueue_embed(session, n.id)
     await session.commit()
     await session.refresh(n)
-    return to_out(n)
+    out = to_out(n)
+    await broadcast_user(
+        user.id,
+        {
+            "type": "note.upsert",
+            "id": str(out.id),
+            "updated_at": out.updated_at.isoformat(),
+        },
+    )
+    return out
 
 
 @router.delete("/{note_id}")
@@ -129,4 +161,8 @@ async def delete_note(
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     n.deleted_at = datetime.now(timezone.utc)
     await session.commit()
+    await broadcast_user(
+        user.id,
+        {"type": "note.delete", "id": str(note_id)},
+    )
     return {"ok": True}

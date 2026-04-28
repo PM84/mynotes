@@ -227,22 +227,39 @@ Verfügbare Tags pro Push:
     **Additional nginx directives**:
 
     ```nginx
-    location /api/ {
+    location ^~ /api/ws/ {
+        proxy_pass http://127.0.0.1:8001/ws/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        "upgrade";
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+    }
+
+    location ^~ /api/ {
         proxy_pass http://127.0.0.1:8001/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         client_max_body_size 64m;
     }
 
-    location / {
-        proxy_pass http://127.0.0.1:8080/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+    location ~ ^/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
     ```
+
+    Hinweise:
+    - `^~ /api/ws/` muss vor `^~ /api/` stehen und schaltet die nötigen
+      WebSocket-Upgrade-Header für den Realtime-Sync (`/api/ws/notes`).
+    - `~ ^/` ist eine Regex-Location; sie umgeht Plesks automatischen
+      `location /`-Block (sonst: `duplicate location "/"`).
 
     TLS/Let's-Encrypt verwaltet weiterhin Plesk.
 

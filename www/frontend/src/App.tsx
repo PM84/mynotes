@@ -7,7 +7,8 @@ import { NoteEditor } from "./views/NoteEditor";
 import { AssetViewer } from "./views/AssetViewer";
 import { AISearch } from "./views/AISearch";
 import { Admin } from "./views/Admin";
-import { onSyncChange, pendingCount, pullTopLevel, trySync } from "./sync";
+import { onSyncChange, pendingCount, pullAll, trySync } from "./sync";
+import { connectRealtime, disconnectRealtime } from "./realtime";
 import { hydrateSearchIndex } from "./searchIndex";
 import { CloudOff, Cloud, Settings, Sparkles, FileText, LogOut } from "lucide-react";
 
@@ -21,16 +22,30 @@ export function App() {
     const upd = async () => setPending(await pendingCount());
     const off = onSyncChange(upd);
     void upd();
-    const onOnline = () => { setOnline(true); void trySync(); };
+    const onOnline = () => { setOnline(true); void trySync(); void pullAll(); };
     const onOffline = () => setOnline(false);
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && auth) {
+        void pullAll();
+        void trySync();
+        connectRealtime();
+      }
+    };
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
-    if (auth) void pullTopLevel();
-    if (auth) void hydrateSearchIndex();
+    document.addEventListener("visibilitychange", onVisible);
+    if (auth) {
+      void pullAll();
+      void hydrateSearchIndex();
+      connectRealtime();
+    } else {
+      disconnectRealtime();
+    }
     return () => {
       off();
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [auth]);
 

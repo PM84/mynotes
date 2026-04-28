@@ -63,18 +63,28 @@ async def test_delete_note_soft(client: AsyncClient, auth_headers: dict):
     assert r.json() == []
 
 
-async def test_last_write_wins_no_conflict(client: AsyncClient, auth_headers: dict):
+async def test_optimistic_locking(client: AsyncClient, auth_headers: dict):
     nid = str(uuid.uuid4())
     r = await client.put(f"/notes/{nid}", json={"title": "v1"}, headers=auth_headers)
     assert r.status_code == 200
-    # Update mit veraltetem client_updated_at -> kein Konflikt (LWW).
+
+    # Ohne client_updated_at: Last-Write-Wins (kein Konflikt).
     r = await client.put(
-        f"/notes/{nid}",
-        json={"title": "v2", "client_updated_at": "2000-01-01T00:00:00Z"},
-        headers=auth_headers,
+        f"/notes/{nid}", json={"title": "v2"}, headers=auth_headers
     )
     assert r.status_code == 200
     assert r.json()["title"] == "v2"
+
+    # Veraltetes client_updated_at: 409.
+    r = await client.put(
+        f"/notes/{nid}",
+        json={"title": "v3", "client_updated_at": "2000-01-01T00:00:00Z"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 409
+    body = r.json()
+    assert body["detail"]["error"] == "conflict"
+    assert body["detail"]["server"]["title"] == "v2"
 
 
 async def test_unauthorized(client: AsyncClient):
