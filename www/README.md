@@ -81,7 +81,7 @@ und veröffentlicht sie auf der GitHub Container Registry (ghcr.io):
 | `ghcr.io/<owner>/mynotes-frontend:<tag>` | Nginx mit gebauten Vite-Assets |
 
 `<owner>` ist der GitHub-User-/Org-Name in **Kleinbuchstaben**
-(z.B. `pm84` bei Repo `PM84/lamp_server_docker`).
+(z.B. `pm84` bei Repo `PM84/mynotes`).
 
 Verfügbare Tags pro Push:
 - `:mynotes` — neueste Version vom Branch (zum Deployen verwenden)
@@ -97,7 +97,7 @@ Verfügbare Tags pro Push:
 #### Schritt-für-Schritt-Checkliste
 
 1. **GitHub-Actions-Run prüfen**
-   <https://github.com/PM84/lamp_server_docker/actions> — beide Matrix-Jobs
+   <https://github.com/PM84/mynotes/actions> — beide Matrix-Jobs
    („backend" und „frontend") müssen grün sein.
 
 2. **Default-Branch (optional, einmalig)**
