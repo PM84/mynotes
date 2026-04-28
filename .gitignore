@@ -1,2 +1,32 @@
+# Backend / Frontend
+www/data/
+www/frontend/node_modules/
+www/frontend/dist/
+www/frontend/dev-dist/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Traefik / Zertifikate
+traefik/certs/
+*.pem
+*.key
+
+# Env
+.env
+.env.local
+
+# Legacy
 /docker
-/traefik/certs/*

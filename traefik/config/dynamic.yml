@@ -5,18 +5,9 @@ http:
       service: "api@internal"
       tls:
         domains:
-          - main: "mbsmoodle.localhost"
+          - main: "mynotes.localhost"
             sans:
-              - "*.mbsmoodle.localhost"
-          - main: "mbsmoodle2.localhost"
-            sans:
-              - "*.mbsmoodle2.localhost"
-          - main: "teachshare.localhost"
-            sans:
-              - "*.teachshare.localhost"
-          - main: "phpmyadmin.localhost"
-            sans:
-              - "*.phpmyadmin.localhost"
+              - "*.mynotes.localhost"
 tls:
   certificates:
     - certFile: "/etc/certs/local-cert.pem"

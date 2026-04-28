@@ -1,75 +1,114 @@
-version: "3.6"
+# MyNotes – lokales Entwicklungs-Setup.
+# Produktion: separates Deployment, www/ wird auf den vServer kopiert.
+
 services:
-    www:
-        build: .
-        volumes:
-            - ./www:/var/www/html/
-        environment:
-            UPLOAD_LIMIT: 64M
-        labels:
-            - "traefik.enable=true"
-            - "traefik.http.routers.webserver.rule=Host(`website.localhost`)"
-            - "traefik.http.routers.webserver.tls=true"
-        networks:
-            mynet:
-    db:
-        image: mysql:latest
-        environment:
-            MYSQL_DATABASE: myDb
-            MYSQL_USER: user
-            MYSQL_PASSWORD: test
-            MYSQL_ROOT_PASSWORD: test
-        command: --default-authentication-plugin=mysql_native_password
-        volumes:
-            - ./dump:/docker-entrypoint-initdb.d
-            - ./docker/mysql:/var/lib/mysql
-            - /etc/timezone:/etc/timezone:ro
-            - /etc/localtime:/etc/localtime:ro
-        networks:
-            mynet:
-    phpmyadmin:
-        image: phpmyadmin/phpmyadmin
-        links:
-            - db:db
-        environment:
-            MYSQL_USER: user
-            MYSQL_PASSWORD: test
-            MYSQL_ROOT_PASSWORD: test
-            # PMA_ARBITRARY: 1 #Wenn gesetzt kann man vor dem Login zuerst die DB auswählen
-            PMA_HOST: db
-            PMA_ABSOLUTE_URI: https://phpmyadmin.localhost
-            UPLOAD_LIMIT: 64M
-        labels:
-            - "traefik.enable=true"
-            - "traefik.http.routers.phpmyadmin.rule=Host(`phpmyadmin.localhost`)"
-            - "traefik.http.routers.phpmyadmin.tls=true"
-        networks:
-            mynet:
-    traefik:
-        image: "traefik:latest"
-        command:
-            - --log.level=DEBUG
-            - --entrypoints.web.address=:80
-            - --entrypoints.web-secure.address=:443
-            - --serverstransport.insecureskipverify=true
-        ports:
-            - "80:80"
-            - "8080:8080"
-            - "443:443"
-        volumes:
-            - "/var/run/docker.sock:/var/run/docker.sock:ro"
-            - "./traefik/config/static.yml:/etc/traefik/traefik.yml:ro"
-            - "./traefik/config/dynamic.yml:/etc/traefik/dynamic.yml:ro"
-            - "./traefik/certs:/etc/certs:ro"
-        networks:
-            mynet:
-                aliases:
-                    - website.localhost
-                    - phpmyadmin.localhost
+  db:
+    image: mariadb:11.7
+    command: >
+      --innodb-buffer-pool-size=512M
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    environment:
+      MARIADB_DATABASE: mynotes
+      MARIADB_USER: app
+      MARIADB_PASSWORD: app
+      MARIADB_ROOT_PASSWORD: root
+    volumes:
+      - db-data:/var/lib/mysql
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    networks: [mynet]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./www/backend
+    volumes:
+      - ./www/backend:/app
+      - ./www/data/assets:/app/data/assets
+    environment:
+      DB_URL: "mysql+asyncmy://app:app@db:3306/mynotes"
+      JWT_SECRET: "dev-secret-change-me"
+      ASSET_DIR: "/app/data/assets"
+      BOOTSTRAP_ADMIN_EMAIL: "admin@mynotes.localhost"
+      BOOTSTRAP_ADMIN_PASSWORD: "admin"
+      CORS_ORIGINS: "https://mynotes.localhost,http://localhost:5173"
+      DEBUG: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mynotes-api.rule=Host(`api.mynotes.localhost`)"
+      - "traefik.http.routers.mynotes-api.tls=true"
+      - "traefik.http.services.mynotes-api.loadbalancer.server.port=8000"
+    networks: [mynet]
+
+  frontend:
+    build:
+      context: ./www/frontend
+    volumes:
+      - ./www/frontend:/app
+      - frontend-node-modules:/app/node_modules
+    environment:
+      VITE_API_BASE: "https://api.mynotes.localhost"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mynotes.rule=Host(`mynotes.localhost`)"
+      - "traefik.http.routers.mynotes.tls=true"
+      - "traefik.http.services.mynotes.loadbalancer.server.port=5173"
+    networks: [mynet]
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    environment:
+      PMA_HOST: db
+      PMA_USER: root
+      PMA_PASSWORD: root
+      UPLOAD_LIMIT: 64M
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mynotes-pma.rule=Host(`phpmyadmin.mynotes.localhost`)"
+      - "traefik.http.routers.mynotes-pma.tls=true"
+    networks: [mynet]
+
+  traefik:
+    image: traefik:v3.6
+    user: root
+    command:
+      - --log.level=INFO
+      - --entrypoints.web.address=:80
+      - --entrypoints.web-secure.address=:443
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+      - --providers.file.watch=true
+      - --api.dashboard=true
+      - --api.insecure=true
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./traefik/config/static.yml:/etc/traefik/traefik.yml:ro"
+      - "./traefik/config/dynamic.yml:/etc/traefik/dynamic.yml:ro"
+      - "./traefik/certs:/etc/certs:ro"
+    networks:
+      mynet:
+        aliases:
+          - mynotes.localhost
+          - api.mynotes.localhost
+          - phpmyadmin.mynotes.localhost
+
 networks:
-    mynet:
-        driver: bridge
-        ipam:
-            driver: default
-            config:
-                - subnet: 192.168.159.0/24
+  mynet:
+    driver: bridge
+
+volumes:
+  db-data:
+  frontend-node-modules:
