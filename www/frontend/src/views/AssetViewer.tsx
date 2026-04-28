@@ -8,7 +8,6 @@ import { ArrowLeft, ChevronLeft, ChevronRight, ScanText } from "lucide-react";
 
 // pdfjs-dist als ESM-Module laden (Worker via URL-Import bei Vite).
 import * as pdfjsLib from "pdfjs-dist";
-// @ts-expect-error – Vite-spezifischer Worker-Loader, kein TS-Typ.
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -49,7 +48,7 @@ export function AssetViewer() {
       const ctx = canvas.getContext("2d")!;
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-      await p.render({ canvasContext: ctx, viewport, canvas }).promise;
+      await p.render({ canvasContext: ctx, viewport }).promise;
     })().catch((e) => toast.error("PDF-Render-Fehler: " + e.message));
     return () => {
       cancelled = true;
