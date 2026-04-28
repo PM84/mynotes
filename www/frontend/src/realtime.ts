@@ -7,6 +7,35 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let attempt = 0;
 let stopped = false;
 
+// Live-Edit-Subscriber pro Note-ID. Wird von NoteEditor genutzt, um
+// Excalidraw-Frames (ohne DB-Roundtrip) sofort anzuwenden.
+type LiveListener = (payload: any) => void;
+const liveListeners = new Map<string, Set<LiveListener>>();
+
+export function subscribeLive(noteId: string, fn: LiveListener): () => void {
+  let set = liveListeners.get(noteId);
+  if (!set) {
+    set = new Set();
+    liveListeners.set(noteId, set);
+  }
+  set.add(fn);
+  return () => {
+    const s = liveListeners.get(noteId);
+    if (!s) return;
+    s.delete(fn);
+    if (!s.size) liveListeners.delete(noteId);
+  };
+}
+
+export function sendLive(noteId: string, payload: Record<string, unknown>): void {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(JSON.stringify({ type: "note.live", id: noteId, ...payload }));
+  } catch {
+    // ignore
+  }
+}
+
 function wsUrl(token: string): string {
   // API_BASE ist normalerweise "/api" oder absolute URL.
   // Für relative Basis nutzen wir location.origin als Anker.
@@ -72,6 +101,17 @@ export function connectRealtime() {
       if (msg.type === "note.upsert" || msg.type === "note.delete") {
         // Wir machen es einfach robust: bei jedem Event komplett ziehen.
         void pullAll();
+      } else if (msg.type === "note.live" && typeof msg.id === "string") {
+        const set = liveListeners.get(msg.id);
+        if (set) {
+          for (const fn of set) {
+            try {
+              fn(msg);
+            } catch (e) {
+              console.warn("live listener error", e);
+            }
+          }
+        }
       }
     } catch {
       // ignore

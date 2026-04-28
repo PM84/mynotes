@@ -27,14 +27,26 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2,wasm}"],
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         navigateFallback: "/index.html",
+        // SPA-Routen wie /notes/<uuid> oder /search dürfen NICHT vom SW
+        // an's Backend weitergereicht werden – sie werden von index.html
+        // gerendert. navigateFallbackDenylist schließt API + WS aus.
+        navigateFallbackDenylist: [/^\/api\//, /^\/ws\//],
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.pathname.startsWith("/notes") || url.pathname.startsWith("/search"),
+            // Nur echte API-GETs (nicht die gleichnamigen SPA-Routen).
+            urlPattern: ({ url, request, sameOrigin }) =>
+              sameOrigin &&
+              request.method === "GET" &&
+              (url.pathname.startsWith("/api/notes") ||
+                url.pathname.startsWith("/api/search")),
             handler: "StaleWhileRevalidate",
             options: { cacheName: "api-get", expiration: { maxAgeSeconds: 7 * 24 * 3600 } },
           },
           {
-            urlPattern: ({ url }) => url.pathname.startsWith("/assets"),
+            urlPattern: ({ url, request, sameOrigin }) =>
+              sameOrigin &&
+              request.method === "GET" &&
+              url.pathname.startsWith("/api/assets"),
             handler: "CacheFirst",
             options: {
               cacheName: "asset-files",

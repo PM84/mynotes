@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db";
 import { storeAssetLocal, upsertNoteLocal } from "../sync";
+import { sendLive, subscribeLive } from "../realtime";
 import { apiJson } from "../api";
 import { toast } from "sonner";
 import { ArrowLeft, Columns, FileText, Image as ImageIcon, Paperclip, PencilLine, Save, ScanLine, Sparkles, Tag, X } from "lucide-react";
@@ -25,6 +26,13 @@ export function NoteEditor() {
   // Ref + eigener Save-Timer.
   const excaliRef = useRef<any>(null);
   const excaliSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Excalidraw-API für updateScene() bei eingehenden Live-Frames.
+  const excalidrawApiRef = useRef<any>(null);
+  // Drosselung des ausgehenden Live-Broadcasts.
+  const liveBroadcastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Wird kurz auf true gesetzt, wenn wir gerade eine Remote-Szene anwenden,
+  // damit der dadurch ausgelöste onChange nicht zurückbroadcastet.
+  const applyingRemoteRef = useRef(false);
   // Verhindert Auto-Save vor dem ersten Hydrate (sonst überschreibt initialer
   // leerer State sofort die geladene Notiz).
   const hydratedRef = useRef(false);
@@ -115,14 +123,50 @@ export function NoteEditor() {
         appState: { viewBackgroundColor: appState?.viewBackgroundColor },
         files: files ?? excaliRef.current?.files ?? null,
       };
+      // Live-Broadcast (200 ms) – nur wenn die Änderung lokal entstanden ist.
+      if (!applyingRemoteRef.current && id) {
+        if (liveBroadcastTimer.current) clearTimeout(liveBroadcastTimer.current);
+        liveBroadcastTimer.current = setTimeout(() => {
+          // Files NICHT mitsenden – zu groß und werden ohnehin per pullAll
+          // nachgereicht. Andere Clients sehen Bild-Elemente kurzzeitig leer.
+          sendLive(id, { kind: "excalidraw", elements });
+        }, 200);
+      }
       if (excaliSaveTimer.current) clearTimeout(excaliSaveTimer.current);
       excaliSaveTimer.current = setTimeout(() => void save(), 800);
     },
-    [save]
+    [save, id]
   );
+
+  // Eingehende Live-Frames anwenden (kein DB-Roundtrip).
+  useEffect(() => {
+    if (!id) return;
+    const off = subscribeLive(id, (payload) => {
+      if (payload?.kind !== "excalidraw" || !Array.isArray(payload.elements)) return;
+      const api = excalidrawApiRef.current;
+      if (!api) return;
+      applyingRemoteRef.current = true;
+      try {
+        api.updateScene({ elements: payload.elements });
+        excaliRef.current = {
+          elements: payload.elements,
+          appState: excaliRef.current?.appState ?? {},
+          files: excaliRef.current?.files ?? null,
+        };
+      } finally {
+        // Excalidraw feuert onChange synchron im nächsten Tick –
+        // den Flag erst danach zurücksetzen.
+        setTimeout(() => {
+          applyingRemoteRef.current = false;
+        }, 50);
+      }
+    });
+    return off;
+  }, [id]);
 
   useEffect(() => () => {
     if (excaliSaveTimer.current) clearTimeout(excaliSaveTimer.current);
+    if (liveBroadcastTimer.current) clearTimeout(liveBroadcastTimer.current);
   }, []);
 
   async function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -426,6 +470,9 @@ export function NoteEditor() {
                 key={layout}
                 initialData={initialData}
                 onChange={onExcaliChange}
+                excalidrawAPI={(api) => {
+                  excalidrawApiRef.current = api;
+                }}
               />
             </Suspense>
           </div>

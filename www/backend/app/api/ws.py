@@ -97,9 +97,18 @@ async def notes_ws(websocket: WebSocket, token: str = Query(...)) -> None:
     try:
         await websocket.send_text(json.dumps({"type": "hello"}))
         while True:
-            # Wir nutzen den Channel nur server→client. Empfangene Frames
-            # dienen lediglich als Keepalive; ignoriert.
-            await websocket.receive_text()
+            raw = await websocket.receive_text()
+            # Eingehende Frames: nur Live-Edit-Events werden weitergereicht
+            # (kein DB-Schreiben). Alles andere ist Keepalive.
+            try:
+                msg = json.loads(raw)
+            except Exception:  # noqa: BLE001
+                continue
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("type") == "note.live":
+                # An alle anderen Verbindungen desselben Users broadcasten.
+                await manager.broadcast(uid, msg, skip=websocket)
     except WebSocketDisconnect:
         pass
     except Exception as e:  # noqa: BLE001
