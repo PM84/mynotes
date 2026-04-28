@@ -72,126 +72,168 @@ darunter den klassischen Weg mit Python-venv + systemd.
 
 ### Deployment via Plesk-Docker (empfohlen)
 
-Bei jedem Push nach `master` baut GitHub Actions automatisch zwei Images
+Bei jedem Push nach `mynotes` baut GitHub Actions automatisch zwei Images
 und veröffentlicht sie auf der GitHub Container Registry (ghcr.io):
 
 | Image | Inhalt |
 |---|---|
-| `ghcr.io/<owner>/mynotes-backend:latest` | FastAPI + Alembic (auto-migrate beim Start) |
-| `ghcr.io/<owner>/mynotes-frontend:latest` | Nginx mit gebauten Vite-Assets |
+| `ghcr.io/<owner>/mynotes-backend:<tag>` | FastAPI + Alembic (auto-migrate beim Start) |
+| `ghcr.io/<owner>/mynotes-frontend:<tag>` | Nginx mit gebauten Vite-Assets |
 
 `<owner>` ist der GitHub-User-/Org-Name in **Kleinbuchstaben**
 (z.B. `pm84` bei Repo `PM84/lamp_server_docker`).
 
-#### Einmalige Vorbereitung
+Verfügbare Tags pro Push:
+- `:mynotes` — neueste Version vom Branch (zum Deployen verwenden)
+- `:sha-xxxxxxx` — exakter Commit (für Rollbacks)
+- `:latest` — **nur wenn `mynotes` der Default-Branch des Repos ist**
 
-1. **Datenbank anlegen** (MariaDB ist auf dem Plesk-Server bereits vorhanden):
+> Solange auf GitHub `master` der Default-Branch ist, gibt es **kein**
+> `:latest`-Tag. Entweder den Default-Branch in den Repo-Settings auf
+> `mynotes` umstellen, oder in Plesk das Tag `:mynotes` verwenden.
+
+---
+
+#### Schritt-für-Schritt-Checkliste
+
+1. **GitHub-Actions-Run prüfen**
+   <https://github.com/PM84/lamp_server_docker/actions> — beide Matrix-Jobs
+   („backend" und „frontend") müssen grün sein.
+
+2. **Default-Branch (optional, einmalig)**
+   GitHub → Repo → *Settings → Branches → Default branch* auf `mynotes`
+   setzen, damit ein `:latest`-Tag entsteht. (Sonst Schritt 6 anpassen.)
+
+3. **Packages auf public stellen**
+   GitHub → eigenes Profil → *Packages* → `mynotes-backend` öffnen →
+   *Package settings → Change visibility → Public*. Wiederholen für
+   `mynotes-frontend`.
+   Alternativ privat lassen und in Plesk unter *Tools & Settings → Docker →
+   Registries* einen GitHub-PAT mit Scope `read:packages` hinterlegen.
+
+4. **Auf dem Plesk-Server einloggen** (SSH) und vorbereiten:
    ```sh
-   mariadb -uroot -p <<'SQL'
+   # Asset-Volume anlegen
+   sudo mkdir -p /var/mynotes/assets
+   sudo chown 1000:1000 /var/mynotes/assets   # uid des Container-Users
+   sudo chmod 755 /var/mynotes/assets
+
+   # MariaDB-Datenbank + User anlegen
+   sudo mariadb -uroot <<'SQL'
    CREATE DATABASE mynotes CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-   CREATE USER 'mynotes'@'localhost' IDENTIFIED BY 'STRONG_PW';
-   CREATE USER 'mynotes'@'127.0.0.1' IDENTIFIED BY 'STRONG_PW';
+   CREATE USER 'mynotes'@'localhost'  IDENTIFIED BY 'STRONG_PW';
+   CREATE USER 'mynotes'@'127.0.0.1'  IDENTIFIED BY 'STRONG_PW';
+   CREATE USER 'mynotes'@'172.17.0.%' IDENTIFIED BY 'STRONG_PW';
    GRANT ALL ON mynotes.* TO 'mynotes'@'localhost';
    GRANT ALL ON mynotes.* TO 'mynotes'@'127.0.0.1';
+   GRANT ALL ON mynotes.* TO 'mynotes'@'172.17.0.%';
    FLUSH PRIVILEGES;
    SQL
    ```
 
-2. **Asset-Verzeichnis** auf dem Host anlegen (wird in den Backend-Container gemountet):
+   > Der Eintrag für `172.17.0.%` ist nötig, weil der Backend-Container die
+   > MariaDB über das Docker-Bridge-Netz erreicht.
+
+5. **JWT-Secret erzeugen** (auf dem Plesk-Server):
    ```sh
-   mkdir -p /var/mynotes/assets && chmod 755 /var/mynotes/assets
+   python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+   ```
+   Notieren — wird gleich als `JWT_SECRET` eingetragen.
+
+6. **Backend-Container in Plesk anlegen**
+   Plesk → *Tools & Settings → Docker → Run Container*:
+
+   | Feld | Wert |
+   |---|---|
+   | Image | `ghcr.io/pm84/mynotes-backend:mynotes` |
+   | Automatic start | ✅ |
+   | Restart Policy | `unless-stopped` |
+   | Port mapping | Container `8000` → Host `8001` (auf `127.0.0.1`) |
+   | Volume | Host `/var/mynotes/assets` → Container `/app/data/assets` |
+
+   Environment-Variablen (Werte ersetzen):
+
+   ```
+   DB_URL=mysql+asyncmy://mynotes:STRONG_PW@host.docker.internal:3306/mynotes
+   JWT_SECRET=<aus Schritt 5>
+   JWT_ALG=HS256
+   JWT_ACCESS_MINUTES=15
+   JWT_REFRESH_DAYS=7
+   ASSET_DIR=/app/data/assets
+   UPLOAD_MAX_MB=64
+   BOOTSTRAP_ADMIN_EMAIL=admin@notes.pemasoft.de
+   BOOTSTRAP_ADMIN_PASSWORD=<initiales Passwort>
+   CORS_ORIGINS=https://notes.pemasoft.de
+   DEBUG=false
    ```
 
-3. **GHCR-Image öffentlich schalten** (einmalig nach dem ersten Build):
-   GitHub → eigenes Profil → *Packages* → `mynotes-backend` / `mynotes-frontend`
-   → *Package settings* → *Change visibility* → **Public**.
-   Alternativ: privat lassen und in Plesk unter *Tools & Settings → Docker → Registries*
-   ein GitHub-Personal-Access-Token mit `read:packages` hinterlegen.
+   > `host.docker.internal` ist in Plesk-Docker verfügbar und zeigt auf
+   > den Host. Falls nicht erreichbar: stattdessen `172.17.0.1` (das
+   > Docker-Bridge-Gateway) verwenden.
 
-#### Container in Plesk anlegen
+7. **Frontend-Container in Plesk anlegen**
 
-Plesk → **Tools & Settings → Docker** → *Run Container*.
+   | Feld | Wert |
+   |---|---|
+   | Image | `ghcr.io/pm84/mynotes-frontend:mynotes` |
+   | Automatic start | ✅ |
+   | Restart Policy | `unless-stopped` |
+   | Port mapping | Container `80` → Host `8080` (auf `127.0.0.1`) |
 
-**Backend-Container** (`mynotes-backend`):
+   Frontend braucht keine Environment-Variablen — die API-Basis ist
+   beim Build fest auf `/api` gesetzt.
 
-| Feld | Wert |
-|---|---|
-| Image | `ghcr.io/<owner>/mynotes-backend:latest` |
-| Automatic start | ✅ |
-| Restart Policy | `unless-stopped` |
-| Port mapping | Container `8000` → Host `8001` (auf `127.0.0.1`) |
-| Volume | Host `/var/mynotes/assets` → Container `/app/data/assets` |
-| Environment | siehe Tabelle unten |
+8. **Container starten** und Logs prüfen
+   In Plesk-Docker beide Container *Run* / *Start*.
+   Backend-Log muss enden mit `Application startup complete`.
+   `alembic upgrade head` läuft beim ersten Start automatisch.
 
-Environment-Variablen (Werte ersetzen):
+9. **Reverse-Proxy am Vhost konfigurieren**
+   Plesk → Domain `notes.pemasoft.de` → *Apache & Nginx Settings* →
+   **Additional nginx directives** (vor Speichern: „nginx als Reverse-Proxy"
+   aktiv lassen, „Smart static files processing" deaktivieren):
 
-```
-DB_URL=mysql+asyncmy://mynotes:STRONG_PW@host.docker.internal:3306/mynotes
-JWT_SECRET=<48 Zeichen, z.B. python -c "import secrets;print(secrets.token_urlsafe(48))">
-JWT_ALG=HS256
-JWT_ACCESS_MINUTES=15
-JWT_REFRESH_DAYS=7
-ASSET_DIR=/app/data/assets
-UPLOAD_MAX_MB=64
-BOOTSTRAP_ADMIN_EMAIL=admin@notes.example.com
-BOOTSTRAP_ADMIN_PASSWORD=<initiales Passwort>
-CORS_ORIGINS=https://notes.example.com
-DEBUG=false
-```
+   ```nginx
+   location /api/ {
+       proxy_pass http://127.0.0.1:8001/;
+       proxy_set_header Host $host;
+       proxy_set_header X-Real-IP $remote_addr;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto $scheme;
+       client_max_body_size 64m;
+   }
 
-> `host.docker.internal` ist in Plesk-Docker verfügbar und zeigt auf den Host.
-> Falls nicht: stattdessen die IP des Docker-Bridge-Gateways verwenden
-> (`ip addr show docker0`, meist `172.17.0.1`).
+   location / {
+       proxy_pass http://127.0.0.1:8080/;
+       proxy_set_header Host $host;
+       proxy_set_header X-Real-IP $remote_addr;
+       proxy_set_header X-Forwarded-Proto $scheme;
+   }
+   ```
 
-**Frontend-Container** (`mynotes-frontend`):
+   TLS/Let's-Encrypt verwaltet weiterhin Plesk.
 
-| Feld | Wert |
-|---|---|
-| Image | `ghcr.io/<owner>/mynotes-frontend:latest` |
-| Automatic start | ✅ |
-| Restart Policy | `unless-stopped` |
-| Port mapping | Container `80` → Host `8080` (auf `127.0.0.1`) |
+10. **Smoke-Test**
+    ```sh
+    curl -fsS https://notes.pemasoft.de/api/healthz   # -> {"ok":true}
+    curl -I  https://notes.pemasoft.de/               # -> 200, text/html
+    ```
+    Im Browser einloggen mit `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD`.
 
-Frontend braucht keine Environment-Variablen — die API-Basis ist im Build
-fest auf `/api` gesetzt.
-
-#### Reverse-Proxy via Plesk-Vhost
-
-Domain `notes.example.com` → *Apache & Nginx Settings* →
-**Additional nginx directives**:
-
-```nginx
-location /api/ {
-    proxy_pass http://127.0.0.1:8001/;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    client_max_body_size 64m;
-}
-
-location / {
-    proxy_pass http://127.0.0.1:8080/;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-```
-
-TLS/Let's-Encrypt verwaltet weiterhin Plesk.
+---
 
 #### Updates einspielen
 
-GitHub-Push nach `master` → Actions baut neue Images → in Plesk-Docker beim
-jeweiligen Container *Recreate* klicken. Alembic-Migrationen werden beim
-Backend-Start automatisch ausgeführt.
+GitHub-Push nach `mynotes` → Actions baut neue Images → in Plesk-Docker
+beim jeweiligen Container *Recreate* klicken (zieht das aktualisierte
+`:mynotes`-Tag). Alembic-Migrationen laufen beim Backend-Start automatisch.
 
 ##### Optional: Auto-Update
 
 Plesk-Erweiterung **„Docker Images Auto-Update"** installieren (oder
-[Watchtower](https://containrrr.dev/watchtower/) als zusätzlichen Container).
-Dann werden `:latest`-Container automatisch neu gestartet, sobald ein neues
-Image in ghcr.io liegt.
+[Watchtower](https://containrrr.dev/watchtower/) als zusätzlichen
+Container). Dann werden Container automatisch neu gestartet, sobald ein
+neues Image in ghcr.io liegt.
 
 ---
 
