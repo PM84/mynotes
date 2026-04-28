@@ -1,0 +1,1 @@
+Extrahiere den gesamten lesbaren Text aus diesem Bild. Gib NUR den extrahierten Text zurück, ohne Kommentar. Erhalte Zeilenumbrüche und Strukturen, die im Bild erkennbar sind. Bei Handschrift transkribiere so präzise wie möglich.
