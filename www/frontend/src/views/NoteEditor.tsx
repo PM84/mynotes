@@ -6,7 +6,7 @@ import { storeAssetLocal, upsertNoteLocal } from "../sync";
 import { sendLive, subscribeLive } from "../realtime";
 import { apiJson } from "../api";
 import { toast } from "sonner";
-import { ArrowLeft, Columns, FileText, Image as ImageIcon, Paperclip, PencilLine, Save, ScanLine, Sparkles, Tag, X } from "lucide-react";
+import { ArrowLeft, Columns, FileText, Image as ImageIcon, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, Sparkles, Tag, X } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = lazy(() =>
@@ -59,6 +59,24 @@ export function NoteEditor() {
   useEffect(() => {
     localStorage.setItem("noteEditor.layout", layout);
   }, [layout]);
+
+  // Vollbildmodus: blendet Toolbar + Anhang-Leiste aus, Canvas/Markdown
+  // bekommen die volle Höhe. Persistiert in localStorage.
+  const [fullscreen, setFullscreen] = useState<boolean>(() => {
+    return localStorage.getItem("noteEditor.fullscreen") === "1";
+  });
+  useEffect(() => {
+    localStorage.setItem("noteEditor.fullscreen", fullscreen ? "1" : "0");
+  }, [fullscreen]);
+  // Esc verlässt den Vollbildmodus.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
 
   const initialData = useMemo(
     () => {
@@ -317,7 +335,8 @@ export function NoteEditor() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className={`flex flex-col h-full ${fullscreen ? "fixed inset-0 z-50 bg-white" : ""}`}>
+      {!fullscreen && (
       <div className="flex items-center gap-2 p-2 border-b bg-white">
         <button onClick={() => nav(-1)} className="p-1 hover:bg-slate-100 rounded">
           <ArrowLeft size={18} />
@@ -399,16 +418,28 @@ export function NoteEditor() {
           </button>
         </div>
       </div>
+      )}
       {/* Prominente, inline editierbare Titelzeile direkt unter der Toolbar.
           Bewusst ohne Rahmen/Hintergrund, damit es wie eine Überschrift wirkt. */}
-      <input
-        className="px-4 py-3 text-2xl font-bold outline-none border-b bg-white placeholder:text-slate-300"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        placeholder="Titel der Notiz…"
-        aria-label="Titel"
-      />
-      {aiResult && (
+      <div className="flex items-center border-b bg-white">
+        <input
+          className="flex-1 px-4 py-3 text-2xl font-bold outline-none bg-transparent placeholder:text-slate-300"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Titel der Notiz…"
+          aria-label="Titel"
+        />
+        <button
+          onClick={() => setFullscreen((v) => !v)}
+          className="p-2 mr-2 hover:bg-slate-100 rounded text-slate-600"
+          title={fullscreen ? "Normalansicht (Esc)" : "Vollbild"}
+          aria-pressed={fullscreen}
+          aria-label={fullscreen ? "Normalansicht" : "Vollbild"}
+        >
+          {fullscreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
+        </button>
+      </div>
+      {!fullscreen && aiResult && (
         <div className="border-b bg-amber-50 p-3 text-sm relative">
           <button
             onClick={() => setAiResult(null)}
@@ -422,7 +453,7 @@ export function NoteEditor() {
           <div className="whitespace-pre-wrap">{aiResult}</div>
         </div>
       )}
-      {assets && assets.length > 0 && (
+      {!fullscreen && assets && assets.length > 0 && (
         <div className="border-b bg-slate-50 p-2 flex gap-2 flex-wrap items-center">
           <Paperclip size={14} className="text-slate-500" />
           {assets.map((a) =>
