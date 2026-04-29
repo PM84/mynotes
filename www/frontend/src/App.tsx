@@ -10,6 +10,7 @@ import { Admin } from "./views/Admin";
 import { onSyncChange, pendingCount, pullAll, trySync } from "./sync";
 import { connectRealtime, disconnectRealtime } from "./realtime";
 import { hydrateSearchIndex } from "./searchIndex";
+import { refreshAuth } from "./api";
 import { CloudOff, Cloud, Settings, Sparkles, FileText, LogOut } from "lucide-react";
 
 export function App() {
@@ -26,6 +27,7 @@ export function App() {
     const onOffline = () => setOnline(false);
     const onVisible = () => {
       if (document.visibilityState === "visible" && auth) {
+        void refreshAuth();
         void pullAll();
         void trySync();
         connectRealtime();
@@ -35,6 +37,7 @@ export function App() {
     window.addEventListener("offline", onOffline);
     document.addEventListener("visibilitychange", onVisible);
     if (auth) {
+      void refreshAuth();
       void pullAll();
       void hydrateSearchIndex();
       connectRealtime();

@@ -13,12 +13,20 @@ from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..ai.registry import build_adapter
+from ..app_settings import (
+    DEFAULT_SESSION_LIFETIME_MINUTES,
+    MAX_SESSION_LIFETIME_MINUTES,
+    MIN_SESSION_LIFETIME_MINUTES,
+    get_setting,
+    set_setting,
+)
 from ..config import get_settings
 from ..db import get_session
 from ..deps import require_admin
 from ..models import (
     AICache,
     AIProvider,
+    AppSetting,
     Asset,
     Note,
     NoteAsset,
@@ -168,6 +176,36 @@ async def preview_provider_models(
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "ai" / "prompts"
 
 
+# --- App-Einstellungen --------------------------------------------------------
+
+@router.get("/settings")
+async def get_app_settings(session: AsyncSession = Depends(get_session)) -> dict:
+    minutes = await get_setting(
+        session, "session_lifetime_minutes", DEFAULT_SESSION_LIFETIME_MINUTES
+    )
+    try:
+        m = int(minutes)
+    except (TypeError, ValueError):
+        m = DEFAULT_SESSION_LIFETIME_MINUTES
+    return {"session_lifetime_minutes": m}
+
+
+@router.put("/settings")
+async def update_app_settings(
+    payload: dict, session: AsyncSession = Depends(get_session)
+) -> dict:
+    raw = payload.get("session_lifetime_minutes")
+    try:
+        m = int(raw)
+    except (TypeError, ValueError) as e:
+        raise HTTPException(400, "invalid session_lifetime_minutes") from e
+    if m < MIN_SESSION_LIFETIME_MINUTES or m > MAX_SESSION_LIFETIME_MINUTES:
+        raise HTTPException(
+            400,
+            f"out of range ({MIN_SESSION_LIFETIME_MINUTES}..{MAX_SESSION_LIFETIME_MINUTES})",
+        )
+    await set_setting(session, "session_lifetime_minutes", m)
+    return {"session_lifetime_minutes": m}
 @router.get("/ai/prompts")
 async def list_prompts() -> list[str]:
     return sorted(p.stem for p in PROMPTS_DIR.glob("*.md"))
@@ -213,6 +251,7 @@ BACKUP_TABLES: list[tuple[str, type]] = [
     ("ai_providers", AIProvider),
     ("ai_cache", AICache),
     ("pending_jobs", PendingJob),
+    ("app_settings", AppSetting),
 ]
 
 

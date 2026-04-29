@@ -22,9 +22,17 @@ def verify_password(hashed: str, pw: str) -> bool:
         return False
 
 
-def create_token(sub: str, *, kind: str, extra: dict[str, Any] | None = None) -> str:
+def create_token(
+    sub: str,
+    *,
+    kind: str,
+    extra: dict[str, Any] | None = None,
+    minutes: int | None = None,
+) -> str:
     now = datetime.now(UTC)
-    if kind == "access":
+    if minutes is not None:
+        exp = now + timedelta(minutes=minutes)
+    elif kind == "access":
         exp = now + timedelta(minutes=settings.jwt_access_minutes)
     else:
         exp = now + timedelta(days=settings.jwt_refresh_days)

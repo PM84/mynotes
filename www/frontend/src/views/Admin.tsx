@@ -52,10 +52,19 @@ export function Admin() {
   const [prompts, setPrompts] = useState<string[]>([]);
   const [activePrompt, setActivePrompt] = useState<string | null>(null);
   const [promptContent, setPromptContent] = useState("");
+  const [sessionMinutes, setSessionMinutes] = useState<number>(40320);
+  const [sessionMinutesInput, setSessionMinutesInput] = useState<string>("40320");
 
   async function reload() {
     setProviders(await api<Provider[]>("/admin/ai/providers"));
     setPrompts(await api<string[]>("/admin/ai/prompts"));
+    try {
+      const s = await api<{ session_lifetime_minutes: number }>("/admin/settings");
+      setSessionMinutes(s.session_lifetime_minutes);
+      setSessionMinutesInput(String(s.session_lifetime_minutes));
+    } catch {
+      // optional
+    }
   }
   useEffect(() => { void reload(); }, []);
 
@@ -134,6 +143,38 @@ export function Admin() {
     if (!activePrompt) return;
     await apiJson(`/admin/ai/prompts/${activePrompt}`, "PUT", { content: promptContent });
     toast.success("Prompt gespeichert");
+  }
+
+  async function saveSessionMinutes() {
+    const m = parseInt(sessionMinutesInput, 10);
+    if (!Number.isFinite(m)) {
+      toast.error("Bitte ganze Zahl in Minuten eingeben.");
+      return;
+    }
+    try {
+      const r = await apiJson<{ session_lifetime_minutes: number }>(
+        "/admin/settings",
+        "PUT",
+        { session_lifetime_minutes: m }
+      );
+      setSessionMinutes(r.session_lifetime_minutes);
+      setSessionMinutesInput(String(r.session_lifetime_minutes));
+      toast.success("Sessiondauer gespeichert (gilt ab nächstem Login/Refresh).");
+    } catch (e: any) {
+      toast.error("Fehler: " + e.message);
+    }
+  }
+
+  function fmtDuration(min: number): string {
+    if (min >= 1440) {
+      const d = min / 1440;
+      return `${Number.isInteger(d) ? d : d.toFixed(1)} Tage`;
+    }
+    if (min >= 60) {
+      const h = min / 60;
+      return `${Number.isInteger(h) ? h : h.toFixed(1)} Std.`;
+    }
+    return `${min} Min.`;
   }
 
   async function downloadBackup() {
@@ -334,6 +375,40 @@ export function Admin() {
               }}
             />
           </label>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold mb-3">Sessiondauer</h2>
+        <p className="text-sm text-slate-600 mb-3">
+          Lebensdauer des Login-Tokens in Minuten. Default: <strong>40320</strong>{" "}
+          (= 4 Wochen). Bei jedem Seitenaufruf (Reload) und beim Sichtbarwerden des
+          Tabs wird die Session automatisch auf diesen Wert zurückgesetzt. Erlaubt:
+          5 – 525 600 Minuten (1 Jahr). Änderungen wirken erst beim nächsten
+          Login/Refresh.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="number"
+            min={5}
+            max={525600}
+            step={1}
+            className="border rounded px-2 py-1 w-32"
+            value={sessionMinutesInput}
+            onChange={(e) => setSessionMinutesInput(e.target.value)}
+          />
+          <span className="text-sm text-slate-500">
+            ≈ {fmtDuration(parseInt(sessionMinutesInput, 10) || sessionMinutes)}
+          </span>
+          <button
+            onClick={saveSessionMinutes}
+            className="px-3 py-1 bg-slate-900 text-white rounded"
+          >
+            Speichern
+          </button>
+          <span className="text-xs text-slate-400">
+            aktuell aktiv: {sessionMinutes} Min. ({fmtDuration(sessionMinutes)})
+          </span>
         </div>
       </section>
     </div>

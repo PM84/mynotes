@@ -8,6 +8,7 @@ from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..app_settings import get_session_lifetime_minutes
 from ..db import get_session
 from ..deps import get_current_user
 from ..models import User, Workspace
@@ -25,9 +26,10 @@ async def login(request: Request, data: LoginIn, session: AsyncSession = Depends
     if not user or not verify_password(user.password_hash, data.password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
     sub = str(uuid.UUID(bytes=user.id))
+    minutes = await get_session_lifetime_minutes(session)
     return TokenOut(
-        access_token=create_token(sub, kind="access", extra={"role": user.role}),
-        refresh_token=create_token(sub, kind="refresh"),
+        access_token=create_token(sub, kind="access", extra={"role": user.role}, minutes=minutes),
+        refresh_token=create_token(sub, kind="refresh", minutes=minutes),
     )
 
 
@@ -46,9 +48,10 @@ async def refresh(token: str, session: AsyncSession = Depends(get_session)) -> T
     user = (await session.execute(select(User).where(User.id == uid))).scalar_one_or_none()
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "user not found")
+    minutes = await get_session_lifetime_minutes(session)
     return TokenOut(
-        access_token=create_token(sub, kind="access", extra={"role": user.role}),
-        refresh_token=create_token(sub, kind="refresh"),
+        access_token=create_token(sub, kind="access", extra={"role": user.role}, minutes=minutes),
+        refresh_token=create_token(sub, kind="refresh", minutes=minutes),
     )
 
 

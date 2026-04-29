@@ -46,3 +46,32 @@ export async function apiBlob(path: string): Promise<Blob> {
   if (!res.ok) throw new ApiError(res.status, null, `${res.status} ${res.statusText}`);
   return res.blob();
 }
+
+/**
+ * Erneuert Access- und Refresh-Token mit dem aktuell gespeicherten Refresh-Token.
+ * Wird beim App-Start (Page-Reload) und nach Re-Connect aufgerufen, damit die
+ * Session-Lebensdauer wieder auf den vollen Default-Wert gesetzt wird.
+ */
+export async function refreshAuth(): Promise<boolean> {
+  const auth = useAuth.getState().auth;
+  if (!auth) return false;
+  try {
+    const res = await fetch(
+      `${API_BASE}/auth/refresh?token=${encodeURIComponent(auth.refresh)}`,
+      { method: "POST" }
+    );
+    if (!res.ok) {
+      if (res.status === 401) useAuth.getState().setAuth(null);
+      return false;
+    }
+    const tok = (await res.json()) as { access_token: string; refresh_token: string };
+    useAuth.getState().setAuth({
+      access: tok.access_token,
+      refresh: tok.refresh_token,
+      email: auth.email,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}

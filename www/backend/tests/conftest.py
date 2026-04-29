@@ -45,6 +45,7 @@ TABLES_TO_TRUNCATE = [
     "assets",
     "notes",
     "ai_providers",
+    "app_settings",
     "workspaces",
     "users",
 ]
