@@ -102,6 +102,12 @@ class AICanvasIn(BaseModel):
     mode: str  # transcribe | summary | elaborate | cleanup
 
 
+class AIExtractTasksIn(BaseModel):
+    note_id: uuid.UUID
+    image_b64: str | None = None
+    mime: str | None = None
+
+
 class ProviderIn(BaseModel):
     name: str
     adapter: str

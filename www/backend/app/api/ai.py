@@ -15,7 +15,7 @@ from ..ai.registry import get_active
 from ..db import get_session
 from ..deps import get_current_user
 from ..models import Note, User
-from ..schemas import AIContradictionsIn, AIRagIn, AIRagOut, AISummarizeIn, AICanvasIn
+from ..schemas import AIContradictionsIn, AIRagIn, AIRagOut, AISummarizeIn, AICanvasIn, AIExtractTasksIn
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -248,3 +248,135 @@ async def vision_ocr(
     except httpx.HTTPStatusError as e:
         raise _http_to_status(e)
     return {"text": text}
+
+
+@router.post("/extract_tasks")
+async def extract_tasks(
+    data: AIExtractTasksIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Extrahiert Aufgaben aus einer Notiz via KI und erstellt/aktualisiert/markiert Tasks."""
+    from ..models import Note, Task
+    from .ws import broadcast_user
+    from ..deps import get_default_workspace
+
+    ws = await get_default_workspace(user, session)
+    note = await session.get(Note, data.note_id.bytes)
+    if not note or note.workspace_id != ws.id:
+        raise HTTPException(404, "note not found")
+
+    # Bestehende aktive Tasks dieser Notiz laden.
+    existing_rows = (
+        await session.execute(
+            select(Task).where(
+                Task.workspace_id == ws.id,
+                Task.note_id == data.note_id.bytes,
+                Task.deleted_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    existing_list = []
+    for t in existing_rows:
+        tid = uuid.UUID(bytes=t.id)
+        existing_list.append({"id": str(tid), "title": t.title, "description": t.description or ""})
+    existing_json = json.dumps(existing_list, ensure_ascii=False) if existing_list else "(keine)"
+
+    content = f"{note.title}\n{note.body_md or ''}\n{note.ocr_text or ''}"
+    prompt_template = load("extract_tasks")
+    prompt = prompt_template.format(existing_tasks=existing_json, content=content)
+
+    # Wenn ein Canvas-Bild mitgeliefert wurde, Vision-Modell nutzen.
+    if data.image_b64 and data.mime:
+        if not data.mime.startswith("image/"):
+            raise HTTPException(400, "mime must be image/*")
+        row, client = await _get_active_or_400(session, "vision")
+        if not row.vision_model:
+            raise HTTPException(400, "no vision_model on active provider")
+        try:
+            raw = await client.vision(data.image_b64, data.mime, prompt, model=row.vision_model)
+        except httpx.HTTPStatusError as e:
+            raise _http_to_status(e)
+    else:
+        row, client = await _get_active_or_400(session, "chat")
+        if not row.chat_model:
+            raise HTTPException(400, "no chat_model on active provider")
+        try:
+            resp = await client.chat([Message(role="user", content=prompt)], model=row.chat_model)
+        except httpx.HTTPStatusError as e:
+            raise _http_to_status(e)
+        raw = resp.text
+
+    # JSON parsen (KI gibt manchmal Markdown-Codeblöcke zurück).
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[-1]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+    try:
+        result = json.loads(cleaned)
+    except json.JSONDecodeError:
+        raise HTTPException(502, "KI-Antwort konnte nicht als JSON geparst werden")
+
+    tasks_data = result.get("tasks", [])
+    removed_ids = result.get("removed_ids", [])
+
+    created = 0
+    updated = 0
+    marked_dnf = 0
+
+    existing_map = {str(uuid.UUID(bytes=t.id)): t for t in existing_rows}
+
+    # Bestehende Position ermitteln für neue Tasks.
+    max_pos_result = (
+        await session.execute(
+            select(Task.position).where(Task.workspace_id == ws.id).order_by(Task.position.desc()).limit(1)
+        )
+    ).scalar_one_or_none()
+    next_pos = (max_pos_result or 0) + 1
+
+    # Tasks erstellen/aktualisieren.
+    for td in tasks_data:
+        match_id = td.get("match_id")
+        title = (td.get("title") or "")[:200]
+        description = td.get("description") or None
+
+        if match_id and match_id in existing_map:
+            # Aktualisieren.
+            t = existing_map[match_id]
+            t.title = title
+            t.description = description
+            updated += 1
+        else:
+            # Neue Aufgabe.
+            t = Task(
+                id=uuid.uuid4().bytes,
+                workspace_id=ws.id,
+                note_id=data.note_id.bytes,
+                title=title,
+                description=description,
+                status="todo",
+                priority=0,
+                position=next_pos,
+            )
+            session.add(t)
+            next_pos += 1
+            created += 1
+
+    # Entfernte Aufgaben mit DNF-Präfix markieren.
+    for rid in removed_ids:
+        if rid in existing_map:
+            t = existing_map[rid]
+            if not t.title.startswith("DNF: "):
+                t.title = f"DNF: {t.title}"
+                marked_dnf += 1
+
+    await session.commit()
+
+    # Broadcast für Echtzeit-Sync.
+    await broadcast_user(
+        user.id,
+        {"type": "task.upsert", "source": "extract_tasks"},
+    )
+
+    return {"created": created, "updated": updated, "marked_dnf": marked_dnf}

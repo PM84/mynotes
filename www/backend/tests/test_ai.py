@@ -223,3 +223,94 @@ async def test_vision_ocr_rejects_non_image(client: AsyncClient, auth_headers: d
         f"/ai/vision_ocr?asset_id={uuid.UUID(bytes=aid)}", headers=auth_headers
     )
     assert r.status_code == 400
+
+
+async def test_extract_tasks_creates_new(client: AsyncClient, auth_headers: dict):
+    """Neue Aufgaben werden aus Notizinhalt extrahiert."""
+    await _create_provider(client, auth_headers)
+    nid = await _create_note(client, auth_headers, "Einkaufen", "- Milch kaufen\n- Brot holen")
+    StubAdapter.chat_response = json.dumps({
+        "tasks": [
+            {"match_id": None, "title": "Milch kaufen", "description": "Milch aus dem Supermarkt besorgen."},
+            {"match_id": None, "title": "Brot holen", "description": "Frisches Brot vom Bäcker holen."},
+        ],
+        "removed_ids": [],
+    })
+    r = await client.post(
+        "/ai/extract_tasks",
+        json={"note_id": nid},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["created"] == 2
+    assert data["updated"] == 0
+    assert data["marked_dnf"] == 0
+
+
+async def test_extract_tasks_updates_and_marks_dnf(client: AsyncClient, auth_headers: dict):
+    """Bestehende Tasks werden aktualisiert, entfernte mit DNF markiert."""
+    await _create_provider(client, auth_headers)
+    nid = await _create_note(client, auth_headers, "Projekt", "- Backend fertigstellen")
+
+    # Erst einen Task anlegen, der zur Notiz gehört.
+    task_id = str(uuid.uuid4())
+    r = await client.put(
+        f"/tasks/{task_id}",
+        json={"title": "Alten Task erledigen", "note_id": nid, "status": "todo"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200, r.text
+
+    StubAdapter.chat_response = json.dumps({
+        "tasks": [
+            {"match_id": task_id, "title": "Backend fertigstellen", "description": "Backend-Implementierung abschließen."},
+        ],
+        "removed_ids": [],
+    })
+    r = await client.post(
+        "/ai/extract_tasks",
+        json={"note_id": nid},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["updated"] == 1
+    assert data["created"] == 0
+
+
+async def test_extract_tasks_marks_removed_as_dnf(client: AsyncClient, auth_headers: dict):
+    """Tasks, die nicht mehr in der Notiz vorkommen, werden mit DNF präfixiert."""
+    await _create_provider(client, auth_headers)
+    nid = await _create_note(client, auth_headers, "Plan", "- Neues Item")
+
+    task_id = str(uuid.uuid4())
+    r = await client.put(
+        f"/tasks/{task_id}",
+        json={"title": "Alter Task", "note_id": nid, "status": "todo"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+
+    StubAdapter.chat_response = json.dumps({
+        "tasks": [
+            {"match_id": None, "title": "Neues Item", "description": "Ein neues To-Do."},
+        ],
+        "removed_ids": [task_id],
+    })
+    r = await client.post(
+        "/ai/extract_tasks",
+        json={"note_id": nid},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["marked_dnf"] == 1
+    assert data["created"] == 1
+
+    # Prüfe, dass der Task tatsächlich DNF-Präfix hat.
+    r = await client.get("/tasks", headers=auth_headers)
+    tasks = r.json()
+    old = [t for t in tasks if t["id"] == task_id]
+    assert len(old) == 1
+    assert old[0]["title"].startswith("DNF: ")

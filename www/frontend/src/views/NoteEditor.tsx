@@ -7,7 +7,7 @@ import { v4 as uuid } from "uuid";
 import { sendLive, subscribeLive } from "../realtime";
 import { apiJson } from "../api";
 import { toast } from "sonner";
-import { ArrowLeft, CheckSquare, Columns, FileText, FolderInput, Image as ImageIcon, Loader2, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, Sparkles, Tag, X } from "lucide-react";
+import { ArrowLeft, CheckSquare, Columns, FileText, FolderInput, Image as ImageIcon, ListChecks, Loader2, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, Sparkles, Tag, X } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = lazy(() =>
@@ -392,6 +392,29 @@ export function NoteEditor() {
     }
   }
 
+  async function extractTasks() {
+    if (!id || !navigator.onLine) return;
+    setBusy("extract");
+    try {
+      await save();
+      const canvasPayload = await exportCanvasToB64();
+      const r = await apiJson<{ created: number; updated: number; marked_dnf: number }>(
+        "/ai/extract_tasks",
+        "POST",
+        { note_id: id, ...(canvasPayload ?? {}) },
+      );
+      const parts: string[] = [];
+      if (r.created) parts.push(`${r.created} erstellt`);
+      if (r.updated) parts.push(`${r.updated} aktualisiert`);
+      if (r.marked_dnf) parts.push(`${r.marked_dnf} als DNF markiert`);
+      toast.success(parts.length ? `Aufgaben: ${parts.join(", ")}` : "Keine neuen Aufgaben erkannt");
+    } catch (e: any) {
+      toast.error("Aufgaben-Extraktion fehlgeschlagen: " + e.message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   if (!note) {
     return <div className="p-4 text-slate-500">Notiz wird geladen…</div>;
   }
@@ -470,6 +493,14 @@ export function NoteEditor() {
           title="Aufgabe aus Notiz erstellen"
         >
           <CheckSquare size={18} />
+        </button>
+        <button
+          onClick={extractTasks}
+          disabled={busy !== null || !navigator.onLine}
+          className="p-1 hover:bg-slate-100 rounded disabled:opacity-30"
+          title="Aufgaben per KI aus Notiz extrahieren"
+        >
+          {busy === "extract" ? <Loader2 size={18} className="animate-spin" /> : <ListChecks size={18} />}
         </button>
         <div className="flex items-center border rounded ml-1" role="group" aria-label="Ansicht">
           <button
