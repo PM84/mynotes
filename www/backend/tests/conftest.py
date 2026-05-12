@@ -42,6 +42,7 @@ TABLES_TO_TRUNCATE = [
     "ai_cache",
     "note_chunks",
     "note_assets",
+    "tasks",
     "assets",
     "notes",
     "ai_providers",

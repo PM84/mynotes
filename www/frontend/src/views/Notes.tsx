@@ -5,7 +5,7 @@ import { db } from "../db";
 import { deleteNoteLocal, upsertNoteLocal } from "../sync";
 import { apiJson } from "../api";
 import { toast } from "sonner";
-import { CheckSquare, FolderTree, Plus, Sparkles, Square, Trash2, X } from "lucide-react";
+import { CheckSquare, FolderTree, Loader2, Plus, Sparkles, Square, Trash2, X } from "lucide-react";
 
 export function Notes() {
   const [params, setParams] = useSearchParams();
@@ -98,7 +98,7 @@ export function Notes() {
               className="flex items-center gap-1 px-3 py-1 rounded text-sm bg-amber-500 text-white disabled:opacity-30"
               title="Ausgewählte Notizen auf Widersprüche prüfen"
             >
-              <Sparkles size={16} /> Widersprüche ({selected.size})
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />} Widersprüche ({selected.size})
             </button>
           )}
           <button

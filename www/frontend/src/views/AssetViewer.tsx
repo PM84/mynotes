@@ -4,7 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db";
 import { apiJson } from "../api";
 import { toast } from "sonner";
-import { ArrowLeft, ChevronLeft, ChevronRight, ScanText } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, ScanText } from "lucide-react";
 
 // pdfjs-dist als ESM-Module laden (Worker via URL-Import bei Vite).
 import * as pdfjsLib from "pdfjs-dist";
@@ -115,7 +115,7 @@ export function AssetViewer() {
             className="flex items-center gap-1 px-2 py-1 text-sm hover:bg-slate-100 rounded disabled:opacity-30"
             title="OCR neu ausführen"
           >
-            <ScanText size={16} /> OCR
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <ScanText size={16} />} OCR
           </button>
         )}
       </div>

@@ -7,7 +7,7 @@ import { v4 as uuid } from "uuid";
 import { sendLive, subscribeLive } from "../realtime";
 import { apiJson } from "../api";
 import { toast } from "sonner";
-import { ArrowLeft, CheckSquare, Columns, FileText, FolderInput, Image as ImageIcon, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, Sparkles, Tag, X } from "lucide-react";
+import { ArrowLeft, CheckSquare, Columns, FileText, FolderInput, Image as ImageIcon, Loader2, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, Sparkles, Tag, X } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = lazy(() =>
@@ -419,7 +419,7 @@ export function NoteEditor() {
           className="p-1 hover:bg-slate-100 rounded disabled:opacity-30"
           title="Auto-Tags via KI"
         >
-          <Tag size={18} />
+          {busy === "tag" ? <Loader2 size={18} className="animate-spin" /> : <Tag size={18} />}
         </button>
         <button
           onClick={summarize}
@@ -427,7 +427,7 @@ export function NoteEditor() {
           className="p-1 hover:bg-slate-100 rounded disabled:opacity-30"
           title="KI-Zusammenfassung"
         >
-          <Sparkles size={18} />
+          {busy === "sum" ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
         </button>
         <div className="flex items-center border rounded ml-1" title="Canvas → Markdown via KI">
           <select
@@ -447,7 +447,7 @@ export function NoteEditor() {
             className="p-1 hover:bg-slate-100 disabled:opacity-30 border-l"
             title="Canvas in Markdown einfügen"
           >
-            <ScanLine size={18} />
+            {busy === "canvas" ? <Loader2 size={18} className="animate-spin" /> : <ScanLine size={18} />}
           </button>
         </div>
         <button onClick={save} className="p-1 hover:bg-slate-100 rounded" title="Jetzt speichern">

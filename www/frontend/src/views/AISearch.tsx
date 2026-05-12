@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiJson } from "../api";
 import { searchLocal } from "../searchIndex";
-import { Search, Sparkles } from "lucide-react";
+import { Loader2, Search, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
@@ -78,7 +78,7 @@ export function AISearch() {
           className="bg-slate-900 text-white px-4 py-2 rounded disabled:opacity-50 flex items-center gap-1"
           title={online ? "KI-Suche (RAG)" : "Offline – nicht verfügbar"}
         >
-          <Sparkles size={16} /> KI-Antwort
+          {busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />} KI-Antwort
         </button>
       </div>
       {!online && (
