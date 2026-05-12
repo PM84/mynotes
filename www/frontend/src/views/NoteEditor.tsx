@@ -6,7 +6,7 @@ import { storeAssetLocal, upsertNoteLocal } from "../sync";
 import { sendLive, subscribeLive } from "../realtime";
 import { apiJson } from "../api";
 import { toast } from "sonner";
-import { ArrowLeft, Columns, FileText, Image as ImageIcon, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, Sparkles, Tag, X } from "lucide-react";
+import { ArrowLeft, Columns, FileText, FolderInput, Image as ImageIcon, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, Sparkles, Tag, X } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = lazy(() =>
@@ -134,12 +134,28 @@ export function NoteEditor() {
 
   const onExcaliChange = useCallback(
     (elements: readonly any[], appState: any, files: any) => {
-      // `files` enthält die Binärdaten eingebetteter Bilder (Map fileId → BinaryFileData).
-      // Ohne diese rendert exportToBlob() Bild-Elemente als leere Rahmen.
+      // Dateien (eingebettete Bilder) mergen: Excalidraw liefert `files`
+      // manchmal als leeres Objekt `{}` (z.B. beim initialen onChange nach
+      // Mount), was den `??`-Operator nicht auslöst. Deshalb altes + neues
+      // zusammenführen und nur referenzierte Dateien behalten.
+      const merged: Record<string, any> = {
+        ...(excaliRef.current?.files ?? {}),
+        ...(files ?? {}),
+      };
+      // Nur Dateien behalten, die von einem image-Element referenziert werden.
+      const referencedIds = new Set(
+        elements
+          .filter((e: any) => e.type === "image" && e.fileId)
+          .map((e: any) => e.fileId),
+      );
+      const cleanFiles: Record<string, any> = {};
+      for (const [fid, fdata] of Object.entries(merged)) {
+        if (referencedIds.has(fid)) cleanFiles[fid] = fdata;
+      }
       excaliRef.current = {
         elements,
         appState: { viewBackgroundColor: appState?.viewBackgroundColor },
-        files: files ?? excaliRef.current?.files ?? null,
+        files: Object.keys(cleanFiles).length > 0 ? cleanFiles : null,
       };
       // Live-Broadcast (200 ms) – nur wenn die Änderung lokal entstanden ist.
       if (!applyingRemoteRef.current && id) {
@@ -182,9 +198,16 @@ export function NoteEditor() {
     return off;
   }, [id]);
 
+  // Refs auf save-Funktion, damit der Unmount-Effekt immer die aktuelle hat.
+  const saveRef = useRef(save);
+  useEffect(() => { saveRef.current = save; }, [save]);
+
   useEffect(() => () => {
     if (excaliSaveTimer.current) clearTimeout(excaliSaveTimer.current);
     if (liveBroadcastTimer.current) clearTimeout(liveBroadcastTimer.current);
+    // Beim Verlassen der Notiz sofort speichern, damit keine Änderungen
+    // (insbesondere Excalidraw-Bilder) durch gecancelte Timer verloren gehen.
+    void saveRef.current();
   }, []);
 
   async function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -204,6 +227,44 @@ export function NoteEditor() {
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [canvasMode, setCanvasMode] = useState<"transcribe" | "summary" | "elaborate" | "cleanup">("transcribe");
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // --- Verschieben-Dialog ---
+  const [showMove, setShowMove] = useState(false);
+  const [moveSearch, setMoveSearch] = useState("");
+  const allNotes = useLiveQuery(() => db.notes.toArray(), []);
+
+  /** IDs aller Nachkommen ermitteln (um Zyklen zu verhindern). */
+  function getDescendantIds(noteId: string, notes: typeof allNotes): Set<string> {
+    const desc = new Set<string>();
+    const queue = [noteId];
+    while (queue.length) {
+      const cur = queue.pop()!;
+      for (const n of notes ?? []) {
+        if (n.parent_id === cur && !desc.has(n.id)) {
+          desc.add(n.id);
+          queue.push(n.id);
+        }
+      }
+    }
+    return desc;
+  }
+
+  const moveTargets = useMemo(() => {
+    if (!allNotes || !id) return [];
+    const excluded = getDescendantIds(id, allNotes);
+    excluded.add(id);
+    return allNotes
+      .filter((n) => !n.deleted && !excluded.has(n.id))
+      .filter((n) => !moveSearch || n.title.toLowerCase().includes(moveSearch.toLowerCase()))
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [allNotes, id, moveSearch]);
+
+  async function moveNote(newParentId: string | null) {
+    if (!id) return;
+    await upsertNoteLocal({ id, parent_id: newParentId });
+    setShowMove(false);
+    toast.success(newParentId ? "Notiz verschoben" : "Notiz nach Root verschoben");
+  }
 
   // Asset-Liste mit Live-Daten aus Dexie.
   const assets = useLiveQuery(async () => {
@@ -391,6 +452,13 @@ export function NoteEditor() {
         <button onClick={save} className="p-1 hover:bg-slate-100 rounded" title="Jetzt speichern">
           <Save size={18} />
         </button>
+        <button
+          onClick={() => { setShowMove(true); setMoveSearch(""); }}
+          className="p-1 hover:bg-slate-100 rounded"
+          title="Notiz verschieben"
+        >
+          <FolderInput size={18} />
+        </button>
         <div className="flex items-center border rounded ml-1" role="group" aria-label="Ansicht">
           <button
             onClick={() => setLayout("md")}
@@ -509,6 +577,64 @@ export function NoteEditor() {
           </div>
         )}
       </div>
+
+      {/* Verschieben-Dialog */}
+      {showMove && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowMove(false)}>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-lg font-semibold">Notiz verschieben</h2>
+              <button onClick={() => setShowMove(false)} className="p-1 hover:bg-slate-100 rounded">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-3 border-b">
+              <input
+                autoFocus
+                className="w-full px-3 py-2 border rounded text-sm"
+                placeholder="Notiz suchen…"
+                value={moveSearch}
+                onChange={(e) => setMoveSearch(e.target.value)}
+              />
+            </div>
+            {note.parent_id && (
+              <div className="px-3 pt-2 text-xs text-slate-500">
+                Aktuell unter: {allNotes?.find((n) => n.id === note.parent_id)?.title || "(ohne Titel)"}
+              </div>
+            )}
+            <ul className="overflow-y-auto flex-1 p-2">
+              <li>
+                <button
+                  onClick={() => moveNote(null)}
+                  className={`w-full text-left px-3 py-2 rounded text-sm hover:bg-slate-100 ${
+                    !note.parent_id ? "bg-slate-100 font-medium" : ""
+                  }`}
+                >
+                  📁 Root (oberste Ebene)
+                </button>
+              </li>
+              {moveTargets.map((n) => (
+                <li key={n.id}>
+                  <button
+                    onClick={() => moveNote(n.id)}
+                    className={`w-full text-left px-3 py-2 rounded text-sm hover:bg-slate-100 ${
+                      note.parent_id === n.id ? "bg-slate-100 font-medium" : ""
+                    }`}
+                  >
+                    📄 {n.title || "(ohne Titel)"}
+                    {n.tags?.length ? (
+                      <span className="ml-2 text-xs text-slate-400">{n.tags.join(" · ")}</span>
+                    ) : null}
+                  </button>
+                </li>
+              ))}
+              {moveTargets.length === 0 && (
+                <li className="text-sm text-slate-400 text-center py-4">Keine passenden Notizen</li>
+              )}
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

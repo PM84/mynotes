@@ -30,3 +30,4 @@ traefik/certs/
 
 # Legacy
 /docker
+www/frontend/.vite/

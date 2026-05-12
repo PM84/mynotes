@@ -35,7 +35,7 @@ export async function upsertNoteLocal(input: Partial<LocalNote> & { id?: string 
   const existing = await db.notes.get(id);
   const next: LocalNote = {
     id,
-    parent_id: input.parent_id ?? existing?.parent_id ?? null,
+    parent_id: "parent_id" in input ? (input.parent_id ?? null) : (existing?.parent_id ?? null),
     title: input.title ?? existing?.title ?? "",
     body_md: input.body_md ?? existing?.body_md ?? null,
     excalidraw: input.excalidraw ?? existing?.excalidraw ?? null,
@@ -142,8 +142,9 @@ export function onConflict(fn: (id: string, server: ServerNote) => void) {
 
 async function runOp(op: PendingOp) {
   if (op.type === "note.upsert") {
+    let serverOut: ServerNote | undefined;
     try {
-      await apiJson(`/notes/${op.payload.id}`, "PUT", op.payload.data);
+      serverOut = await apiJson<ServerNote>(`/notes/${op.payload.id}`, "PUT", op.payload.data);
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
         // Server hat eine neuere Version. Strategie: Server-wins. Lokale
@@ -174,7 +175,21 @@ async function runOp(op: PendingOp) {
     const n = await db.notes.get(op.payload.id);
     if (n) {
       n.dirty = 0;
+      if (serverOut?.updated_at) n.updated_at = serverOut.updated_at;
       await db.notes.put(n);
+    }
+    // Nach erfolgreichem Push: client_updated_at in allen verbleibenden
+    // Pending-Ops für dieselbe Notiz auf den Server-Timestamp aktualisieren,
+    // damit die Optimistic-Locking-Prüfung beim nächsten Push keinen
+    // falschen 409-Conflict auslöst.
+    if (serverOut?.updated_at) {
+      const pendingOps = await db.pending.toArray();
+      for (const p of pendingOps) {
+        if (p.type === "note.upsert" && p.payload?.id === op.payload.id) {
+          p.payload.data.client_updated_at = serverOut.updated_at;
+          await db.pending.put(p);
+        }
+      }
     }
   } else if (op.type === "note.delete") {
     await apiJson(`/notes/${op.payload.id}`, "DELETE");
