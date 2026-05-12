@@ -1,9 +1,9 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
-import { db, type LocalTask, type TaskStatus } from "../db";
+import { type LocalTask, type TaskStatus } from "../db";
 import { upsertTaskLocal, deleteTaskLocal, listLocalTasks } from "../sync";
-import { Plus, Trash2, Link as LinkIcon, X, GripVertical } from "lucide-react";
+import { Plus, Trash2, Link as LinkIcon, GripVertical } from "lucide-react";
 import { Link } from "react-router-dom";
 import { v4 as uuid } from "uuid";
 
@@ -31,7 +31,7 @@ export function Tasks() {
 
   const onDragEnd = useCallback(
     (result: DropResult) => {
-      const { source, destination, draggableId } = result;
+      const { source, destination } = result;
       if (!destination) return;
       if (source.droppableId === destination.droppableId && source.index === destination.index) return;
 
