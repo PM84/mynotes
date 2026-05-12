@@ -54,10 +54,17 @@ export function Admin() {
   const [promptContent, setPromptContent] = useState("");
   const [sessionMinutes, setSessionMinutes] = useState<number>(40320);
   const [sessionMinutesInput, setSessionMinutesInput] = useState<string>("40320");
+  const [backendVersion, setBackendVersion] = useState<string>("…");
 
   async function reload() {
     setProviders(await api<Provider[]>("/admin/ai/providers"));
     setPrompts(await api<string[]>("/admin/ai/prompts"));
+    try {
+      const h = await api<{ version: string }>("/healthz");
+      setBackendVersion(h.version);
+    } catch {
+      setBackendVersion("?");
+    }
     try {
       const s = await api<{ session_lifetime_minutes: number }>("/admin/settings");
       setSessionMinutes(s.session_lifetime_minutes);
@@ -409,6 +416,14 @@ export function Admin() {
           <span className="text-xs text-slate-400">
             aktuell aktiv: {sessionMinutes} Min. ({fmtDuration(sessionMinutes)})
           </span>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold mb-3">Version</h2>
+        <div className="text-sm text-slate-600 space-y-1">
+          <p>Frontend: <code className="bg-slate-100 px-1 rounded">{import.meta.env.VITE_BUILD_SHA ?? "dev"}</code></p>
+          <p>Backend: <code className="bg-slate-100 px-1 rounded">{backendVersion}</code></p>
         </div>
       </section>
     </div>
