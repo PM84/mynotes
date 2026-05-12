@@ -20,6 +20,15 @@ export function App() {
   const [pending, setPending] = useState(0);
   const [online, setOnline] = useState(navigator.onLine);
 
+  // Einmalig beim Laden: Token auffrischen (Session verlängern).
+  // Bewusst NICHT im [auth]-Effect, da refreshAuth() neue Tokens setzt und
+  // damit auth ändert → Endlosschleife.
+  useEffect(() => {
+    if (useAuth.getState().auth) {
+      void refreshAuth();
+    }
+  }, []);
+
   useEffect(() => {
     const upd = async () => setPending(await pendingCount());
     const off = onSyncChange(upd);
@@ -38,7 +47,6 @@ export function App() {
     window.addEventListener("offline", onOffline);
     document.addEventListener("visibilitychange", onVisible);
     if (auth) {
-      void refreshAuth();
       void pullAll();
       void hydrateSearchIndex();
       connectRealtime();
