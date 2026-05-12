@@ -64,21 +64,19 @@ export function App() {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="flex items-center justify-between px-4 py-2 bg-slate-900 text-white">
-        <div className="flex items-center gap-4">
-          <Link to="/" className="font-bold">MyNotes</Link>
+      <header className="flex items-center justify-between px-2 sm:px-4 py-2 bg-slate-900 text-white gap-2 min-w-0">
+        <div className="flex items-center gap-1 sm:gap-4 min-w-0">
+          <Link to="/" className="font-bold text-sm sm:text-base whitespace-nowrap">MyNotes</Link>
           <NavLink to="/" icon={<FileText size={16} />} label="Notizen" />
           <NavLink to="/tasks" icon={<KanbanSquare size={16} />} label="Aufgaben" />
           <NavLink to="/ai" icon={<Sparkles size={16} />} label="KI-Suche" />
           <NavLink to="/admin" icon={<Settings size={16} />} label="Admin" />
         </div>
-        <div className="flex items-center gap-3 text-sm">
-          {online ? <Cloud size={16} className="text-emerald-400" /> : <CloudOff size={16} className="text-amber-400" />}
-          <span title="ausstehende Synchronisationen">
-            {pending > 0 ? `${pending} ausstehend` : online ? "online" : "offline"}
-          </span>
-          <span className="opacity-70">{auth.email}</span>
-          <button onClick={() => setAuth(null)} className="opacity-70 hover:opacity-100" title="Logout">
+        <div className="flex items-center gap-2 sm:gap-3 text-sm min-w-0">
+          {online ? <Cloud size={16} className="text-emerald-400 shrink-0" /> : <CloudOff size={16} className="text-amber-400 shrink-0" />}
+          {pending > 0 && <span className="whitespace-nowrap">{pending}</span>}
+          <span className="opacity-70 hidden sm:inline truncate max-w-[10rem]">{auth.email}</span>
+          <button onClick={() => setAuth(null)} className="opacity-70 hover:opacity-100 shrink-0" title="Logout">
             <LogOut size={16} />
           </button>
         </div>
@@ -105,8 +103,9 @@ function NavLink({ to, icon, label }: { to: string; icon: React.ReactNode; label
     <Link
       to={to}
       className={`flex items-center gap-1 px-2 py-1 rounded ${active ? "bg-slate-700" : "hover:bg-slate-800"}`}
+      title={label}
     >
-      {icon} {label}
+      {icon} <span className="hidden sm:inline">{label}</span>
     </Link>
   );
 }

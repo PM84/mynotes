@@ -422,12 +422,12 @@ export function NoteEditor() {
   return (
     <div className={`flex flex-col h-full ${fullscreen ? "fixed inset-0 z-50 bg-white" : ""}`}>
       {!fullscreen && (
-      <div className="flex items-center gap-2 p-2 border-b bg-white">
+      <div className="flex flex-wrap items-center gap-1 sm:gap-2 p-2 border-b bg-white">
         <button onClick={() => nav(-1)} className="p-1 hover:bg-slate-100 rounded">
           <ArrowLeft size={18} />
         </button>
         <input
-          className="flex-1 px-2 py-1 text-sm border rounded"
+          className="flex-1 min-w-[8rem] px-2 py-1 text-sm border rounded"
           value={tags}
           onChange={(e) => setTags(e.target.value)}
           placeholder="tags, komma, getrennt"
@@ -452,7 +452,7 @@ export function NoteEditor() {
         >
           {busy === "sum" ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
         </button>
-        <div className="flex items-center border rounded ml-1" title="Canvas → Markdown via KI">
+        <div className="flex items-center border rounded" title="Canvas → Markdown via KI">
           <select
             value={canvasMode}
             onChange={(e) => setCanvasMode(e.target.value as any)}
@@ -502,7 +502,7 @@ export function NoteEditor() {
         >
           {busy === "extract" ? <Loader2 size={18} className="animate-spin" /> : <ListChecks size={18} />}
         </button>
-        <div className="flex items-center border rounded ml-1" role="group" aria-label="Ansicht">
+        <div className="flex items-center border rounded" role="group" aria-label="Ansicht">
           <button
             onClick={() => setLayout("md")}
             className={`p-1 ${layout === "md" ? "bg-slate-200" : "hover:bg-slate-100"}`}
