@@ -20,6 +20,10 @@ COPY pyproject.toml ./
 RUN pip install --upgrade pip \
     && pip install "."
 
+# Build-Version (Git-SHA), wird per CI uebergeben.
+ARG BUILD_SHA=dev
+ENV APP_VERSION=$BUILD_SHA
+
 # Anwendungscode + Migrationen.
 COPY app ./app
 COPY alembic ./alembic

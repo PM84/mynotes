@@ -4,7 +4,9 @@ from httpx import AsyncClient
 async def test_healthz(client: AsyncClient):
     r = await client.get("/healthz")
     assert r.status_code == 200
-    assert r.json() == {"ok": True}
+    data = r.json()
+    assert data["ok"] is True
+    assert "version" in data
 
 
 async def test_login_bad_password(client: AsyncClient):

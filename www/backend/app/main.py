@@ -54,6 +54,8 @@ async def _bootstrap_admin() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import os
+    log.info("MyNotes Backend starting – version %s", os.getenv("APP_VERSION", "dev"))
     await _bootstrap_admin()
     task = asyncio.create_task(worker_loop())
     app.state.worker_task = task
@@ -104,7 +106,8 @@ app.add_middleware(SecurityHeadersMiddleware)
 
 @app.get("/healthz")
 async def healthz() -> dict:
-    return {"ok": True}
+    import os
+    return {"ok": True, "version": os.getenv("APP_VERSION", "dev")}
 
 
 @app.get("/healthz/deep")

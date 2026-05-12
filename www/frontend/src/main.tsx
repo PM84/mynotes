@@ -8,6 +8,12 @@ import { registerSW } from "virtual:pwa-register";
 import { toast } from "sonner";
 import "./index.css";
 
+console.info(
+  `%cMyNotes Frontend%c v${import.meta.env.VITE_BUILD_SHA ?? "dev"}`,
+  "font-weight:bold",
+  "font-weight:normal",
+);
+
 registerSW({
   immediate: true,
   onNeedRefresh() {
