@@ -250,8 +250,15 @@ async function runOp(op: PendingOp) {
     }
     const n = await db.notes.get(op.payload.id);
     if (n) {
-      n.dirty = 0;
       if (serverOut?.updated_at) n.updated_at = serverOut.updated_at;
+      // dirty erst auf 0 setzen, wenn KEINE weiteren Pending-Ops für diese
+      // Notiz existieren. Sonst löscht/überschreibt ein paralleler pullAll
+      // die lokale Notiz, obwohl noch Änderungen ausstehen (Race-Condition
+      // zwischen trySync und pullAll beim Online-Event).
+      const morePending = await db.pending
+        .filter((p) => p.type === "note.upsert" && p.payload?.id === op.payload.id)
+        .count();
+      n.dirty = morePending > 0 ? 1 : 0;
       await db.notes.put(n);
     }
     // Nach erfolgreichem Push: client_updated_at in allen verbleibenden
@@ -334,8 +341,11 @@ async function runOp(op: PendingOp) {
     }
     const t = await db.tasks.get(op.payload.id);
     if (t) {
-      t.dirty = 0;
       if (serverOut?.updated_at) t.updated_at = serverOut.updated_at;
+      const morePending = await db.pending
+        .filter((p) => p.type === "task.upsert" && p.payload?.id === op.payload.id)
+        .count();
+      t.dirty = morePending > 0 ? 1 : 0;
       await db.tasks.put(t);
     }
     if (serverOut?.updated_at) {

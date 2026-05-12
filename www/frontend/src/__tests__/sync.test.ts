@@ -61,4 +61,18 @@ describe("sync local CRUD", () => {
     const got = await getLocalNote(n.id);
     expect(got?.title).toBe("G");
   });
+
+  it("excalidraw-Daten bleiben dirty solange weitere Ops ausstehen", async () => {
+    // Szenario: Notiz offline anlegen, dann Excalidraw-Daten speichern
+    // → 2 pending Ops. Nach Op1 muss dirty=1 bleiben (Op2 steht noch aus).
+    const n = await upsertNoteLocal({ title: "Zeichnung" });
+    const excaliData = { elements: [{ type: "freedraw" }], appState: {}, files: null };
+    await upsertNoteLocal({ id: n.id, excalidraw: excaliData });
+    expect(await pendingCount()).toBe(2);
+
+    // Prüfe: Notiz hat Excalidraw-Daten und ist dirty
+    const before = await db.notes.get(n.id);
+    expect(before?.excalidraw).toEqual(excaliData);
+    expect(before?.dirty).toBe(1);
+  });
 });

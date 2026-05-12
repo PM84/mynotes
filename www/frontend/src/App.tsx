@@ -24,7 +24,7 @@ export function App() {
     const upd = async () => setPending(await pendingCount());
     const off = onSyncChange(upd);
     void upd();
-    const onOnline = () => { setOnline(true); void trySync(); void pullAll(); };
+    const onOnline = () => { setOnline(true); void trySync().then(() => pullAll()); };
     const onOffline = () => setOnline(false);
     const onVisible = () => {
       if (document.visibilityState === "visible" && auth) {
