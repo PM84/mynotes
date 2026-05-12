@@ -98,7 +98,8 @@ export function connectRealtime() {
   ws.onmessage = (ev) => {
     try {
       const msg = JSON.parse(ev.data);
-      if (msg.type === "note.upsert" || msg.type === "note.delete") {
+      if (msg.type === "note.upsert" || msg.type === "note.delete"
+          || msg.type === "task.upsert" || msg.type === "task.delete") {
         // Wir machen es einfach robust: bei jedem Event komplett ziehen.
         void pullAll();
       } else if (msg.type === "note.live" && typeof msg.id === "string") {

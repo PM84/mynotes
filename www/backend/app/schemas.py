@@ -128,3 +128,31 @@ class ProviderOut(BaseModel):
     is_active_chat: bool
     is_active_embed: bool
     is_active_vision: bool
+
+
+# ---------- Tasks ----------
+
+class TaskIn(BaseModel):
+    id: uuid.UUID | None = None
+    note_id: uuid.UUID | None = None
+    title: str = ""
+    description: str | None = None
+    status: str = "backlog"
+    priority: int = 0
+    position: int = 0
+    due_date: datetime | None = None
+    client_updated_at: datetime | None = None
+
+
+class TaskOut(BaseModel):
+    id: uuid.UUID
+    note_id: uuid.UUID | None
+    title: str
+    description: str | None
+    status: str
+    priority: int
+    position: int
+    due_date: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None = None

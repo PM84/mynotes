@@ -1,4 +1,4 @@
-import { db, type LocalNote, type PendingOp } from "./db";
+import { db, type LocalNote, type LocalTask, type PendingOp } from "./db";
 import { api, apiJson, ApiError } from "./api";
 import { v4 as uuid } from "uuid";
 
@@ -10,6 +10,20 @@ export type ServerNote = {
   excalidraw: any | null;
   ocr_text: string | null;
   tags: string[] | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at?: string | null;
+};
+
+export type ServerTask = {
+  id: string;
+  note_id: string | null;
+  title: string;
+  description: string | null;
+  status: string;
+  priority: number;
+  position: number;
+  due_date: string | null;
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;
@@ -94,6 +108,68 @@ export async function storeAssetLocal(file: File): Promise<string> {
   });
   void trySync();
   return id;
+}
+
+// ---------- Task local CRUD ----------
+
+export async function listLocalTasks() {
+  const all = await db.tasks.toArray();
+  return all.filter((t) => !t.deleted).sort((a, b) => a.position - b.position);
+}
+
+export async function getLocalTask(id: string) {
+  return db.tasks.get(id);
+}
+
+export async function upsertTaskLocal(input: Partial<LocalTask> & { id?: string }) {
+  const id = input.id ?? uuid();
+  const existing = await db.tasks.get(id);
+  const next: LocalTask = {
+    id,
+    note_id: input.note_id !== undefined ? (input.note_id ?? null) : (existing?.note_id ?? null),
+    title: input.title ?? existing?.title ?? "",
+    description: input.description !== undefined ? input.description : (existing?.description ?? null),
+    status: input.status ?? existing?.status ?? "backlog",
+    priority: input.priority ?? existing?.priority ?? 0,
+    position: input.position ?? existing?.position ?? 0,
+    due_date: input.due_date !== undefined ? input.due_date : (existing?.due_date ?? null),
+    updated_at: now(),
+    dirty: 1,
+    deleted: 0,
+  };
+  await db.tasks.put(next);
+  const baseUpdatedAt = existing?.updated_at ?? null;
+  await db.pending.add({
+    type: "task.upsert",
+    payload: {
+      id,
+      data: {
+        id,
+        note_id: next.note_id,
+        title: next.title,
+        description: next.description,
+        status: next.status,
+        priority: next.priority,
+        position: next.position,
+        due_date: next.due_date,
+        client_updated_at: baseUpdatedAt,
+      },
+    },
+    created_at: Date.now(),
+  });
+  void trySync();
+  return next;
+}
+
+export async function deleteTaskLocal(id: string) {
+  const t = await db.tasks.get(id);
+  if (!t) return;
+  t.deleted = 1;
+  t.updated_at = now();
+  t.dirty = 1;
+  await db.tasks.put(t);
+  await db.pending.add({ type: "task.delete", payload: { id }, created_at: Date.now() });
+  void trySync();
 }
 
 // ---------- Sync engine ----------
@@ -229,6 +305,51 @@ async function runOp(op: PendingOp) {
       local.serverSha = res.sha256;
       await db.assets.put(local);
     }
+  } else if (op.type === "task.upsert") {
+    let serverOut: ServerTask | undefined;
+    try {
+      serverOut = await apiJson<ServerTask>(`/tasks/${op.payload.id}`, "PUT", op.payload.data);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        const body = (e.body as any) ?? {};
+        const server: ServerTask | undefined = body?.detail?.server;
+        if (server) {
+          await db.tasks.put({
+            id: server.id,
+            note_id: server.note_id,
+            title: server.title,
+            description: server.description,
+            status: server.status as any,
+            priority: server.priority,
+            position: server.position,
+            due_date: server.due_date,
+            updated_at: server.updated_at,
+            dirty: 0,
+            deleted: server.deleted_at ? 1 : 0,
+          });
+        }
+        return;
+      }
+      throw e;
+    }
+    const t = await db.tasks.get(op.payload.id);
+    if (t) {
+      t.dirty = 0;
+      if (serverOut?.updated_at) t.updated_at = serverOut.updated_at;
+      await db.tasks.put(t);
+    }
+    if (serverOut?.updated_at) {
+      const pendingOps = await db.pending.toArray();
+      for (const p of pendingOps) {
+        if (p.type === "task.upsert" && p.payload?.id === op.payload.id) {
+          p.payload.data.client_updated_at = serverOut.updated_at;
+          await db.pending.put(p);
+        }
+      }
+    }
+  } else if (op.type === "task.delete") {
+    await apiJson(`/tasks/${op.payload.id}`, "DELETE");
+    await db.tasks.delete(op.payload.id);
   }
 }
 
@@ -284,8 +405,52 @@ export async function pullAll() {
         }
       }
     });
+    // Pull tasks
+    await pullTasks();
     notify();
   } catch (e) {
     console.warn("pull failed", e);
+  }
+}
+
+async function pullTasks() {
+  try {
+    const remote = await api<ServerTask[]>("/tasks?include_deleted=1");
+    const remoteIds = new Set(remote.map((r) => r.id));
+    await db.transaction("rw", db.tasks, async () => {
+      for (const r of remote) {
+        const local = await db.tasks.get(r.id);
+        const isDeleted = !!r.deleted_at;
+        if (isDeleted) {
+          if (local && !local.dirty) {
+            await db.tasks.delete(r.id);
+          }
+          continue;
+        }
+        if (!local || (!local.dirty && r.updated_at > local.updated_at)) {
+          await db.tasks.put({
+            id: r.id,
+            note_id: r.note_id,
+            title: r.title,
+            description: r.description,
+            status: r.status as any,
+            priority: r.priority,
+            position: r.position,
+            due_date: r.due_date,
+            updated_at: r.updated_at,
+            dirty: 0,
+            deleted: 0,
+          });
+        }
+      }
+      const all = await db.tasks.toArray();
+      for (const local of all) {
+        if (!remoteIds.has(local.id) && !local.dirty) {
+          await db.tasks.delete(local.id);
+        }
+      }
+    });
+  } catch (e) {
+    console.warn("pull tasks failed", e);
   }
 }

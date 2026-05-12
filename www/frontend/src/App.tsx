@@ -7,11 +7,12 @@ import { NoteEditor } from "./views/NoteEditor";
 import { AssetViewer } from "./views/AssetViewer";
 import { AISearch } from "./views/AISearch";
 import { Admin } from "./views/Admin";
+import { Tasks } from "./views/Tasks";
 import { onSyncChange, pendingCount, pullAll, trySync } from "./sync";
 import { connectRealtime, disconnectRealtime } from "./realtime";
 import { hydrateSearchIndex } from "./searchIndex";
 import { refreshAuth } from "./api";
-import { CloudOff, Cloud, Settings, Sparkles, FileText, LogOut } from "lucide-react";
+import { CloudOff, Cloud, Settings, Sparkles, FileText, LogOut, KanbanSquare } from "lucide-react";
 
 export function App() {
   const auth = useAuth((s) => s.auth);
@@ -67,6 +68,7 @@ export function App() {
         <div className="flex items-center gap-4">
           <Link to="/" className="font-bold">MyNotes</Link>
           <NavLink to="/" icon={<FileText size={16} />} label="Notizen" />
+          <NavLink to="/tasks" icon={<KanbanSquare size={16} />} label="Aufgaben" />
           <NavLink to="/ai" icon={<Sparkles size={16} />} label="KI-Suche" />
           <NavLink to="/admin" icon={<Settings size={16} />} label="Admin" />
         </div>
@@ -84,6 +86,7 @@ export function App() {
       <main className="flex-1 min-h-0 overflow-auto">
         <Routes>
           <Route path="/" element={<Notes />} />
+          <Route path="/tasks" element={<Tasks />} />
           <Route path="/notes/:id" element={<NoteEditor />} />
           <Route path="/assets/:id" element={<AssetViewer />} />
           <Route path="/ai" element={<AISearch />} />

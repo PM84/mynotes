@@ -12,7 +12,7 @@ from slowapi.util import get_remote_address
 from sqlalchemy import select, text
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .api import admin, ai as ai_routes, assets, auth, notes, search, sync, ws
+from .api import admin, ai as ai_routes, assets, auth, notes, search, sync, tasks, ws
 from .config import get_settings
 from .db import SessionLocal
 from .models import User, Workspace
@@ -129,4 +129,5 @@ app.include_router(search.router)
 app.include_router(ai_routes.router)
 app.include_router(admin.router)
 app.include_router(sync.router)
+app.include_router(tasks.router)
 app.include_router(ws.router)

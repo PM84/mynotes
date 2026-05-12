@@ -5,9 +5,18 @@ import { BrowserRouter } from "react-router-dom";
 import { Toaster } from "sonner";
 import { App } from "./App";
 import { registerSW } from "virtual:pwa-register";
+import { toast } from "sonner";
 import "./index.css";
 
-registerSW({ immediate: true });
+registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    toast("Neue Version verfügbar", {
+      action: { label: "Aktualisieren", onClick: () => location.reload() },
+      duration: Infinity,
+    });
+  },
+});
 
 const qc = new QueryClient({
   defaultOptions: {

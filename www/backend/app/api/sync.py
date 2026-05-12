@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.notes import upsert_note
+from ..api.tasks import upsert_task
 from ..db import get_session
 from ..deps import get_current_user
 from ..models import User
-from ..schemas import NoteIn
+from ..schemas import NoteIn, TaskIn
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -26,6 +27,8 @@ async def batch(
     Wendet eine Sequenz von Mutationen an. Jede Op:
       { "type": "note.upsert", "id": "<uuid>", "data": {...} }
       { "type": "note.delete", "id": "<uuid>" }
+      { "type": "task.upsert", "id": "<uuid>", "data": {...} }
+      { "type": "task.delete", "id": "<uuid>" }
     Liefert pro Op { ok | error }.
     """
     results: list[dict] = []
@@ -43,6 +46,15 @@ async def batch(
                 nid = uuid.UUID(op["id"])
                 await del_n(nid, session, user)
                 results.append({"ok": True, "id": str(nid)})
+            elif t == "task.upsert":
+                tid = uuid.UUID(op["id"])
+                await upsert_task(tid, TaskIn(**op["data"]), session, user)
+                results.append({"ok": True, "id": str(tid)})
+            elif t == "task.delete":
+                from ..api.tasks import delete_task as del_t
+                tid = uuid.UUID(op["id"])
+                await del_t(tid, session, user)
+                results.append({"ok": True, "id": str(tid)})
             else:
                 results.append({"error": f"unknown op {t}"})
         except Exception as e:

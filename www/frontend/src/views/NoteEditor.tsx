@@ -2,11 +2,12 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db";
-import { storeAssetLocal, upsertNoteLocal } from "../sync";
+import { storeAssetLocal, upsertNoteLocal, upsertTaskLocal } from "../sync";
+import { v4 as uuid } from "uuid";
 import { sendLive, subscribeLive } from "../realtime";
 import { apiJson } from "../api";
 import { toast } from "sonner";
-import { ArrowLeft, Columns, FileText, FolderInput, Image as ImageIcon, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, Sparkles, Tag, X } from "lucide-react";
+import { ArrowLeft, CheckSquare, Columns, FileText, FolderInput, Image as ImageIcon, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, Sparkles, Tag, X } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = lazy(() =>
@@ -458,6 +459,17 @@ export function NoteEditor() {
           title="Notiz verschieben"
         >
           <FolderInput size={18} />
+        </button>
+        <button
+          onClick={() => {
+            if (!id) return;
+            void upsertTaskLocal({ id: uuid(), title: title || "Aufgabe aus Notiz", note_id: id, status: "todo" });
+            toast.success("Aufgabe erstellt");
+          }}
+          className="p-1 hover:bg-slate-100 rounded"
+          title="Aufgabe aus Notiz erstellen"
+        >
+          <CheckSquare size={18} />
         </button>
         <div className="flex items-center border rounded ml-1" role="group" aria-label="Ansicht">
           <button

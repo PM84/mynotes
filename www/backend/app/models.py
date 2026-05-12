@@ -141,6 +141,29 @@ class PendingJob(Base):
     )
 
 
+class Task(Base):
+    __tablename__ = "tasks"
+    id: Mapped[bytes] = mapped_column(BINARY(16), primary_key=True, default=uuid_bytes)
+    workspace_id: Mapped[bytes] = mapped_column(BINARY(16), ForeignKey("workspaces.id"), index=True)
+    note_id: Mapped[bytes | None] = mapped_column(BINARY(16), ForeignKey("notes.id", ondelete="SET NULL"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(500), default="")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="backlog")  # backlog|todo|doing|done
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_tasks_workspace_status", "workspace_id", "status"),
+        Index("ix_tasks_workspace_updated", "workspace_id", "updated_at"),
+    )
+
+
 class AppSetting(Base):
     """Globale, zur Laufzeit veränderbare Konfiguration (Key/Value, JSON-Wert)."""
     __tablename__ = "app_settings"
