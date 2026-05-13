@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Routes, Route, Navigate, Link, useLocation } from "react-router-dom";
 import { useAuth } from "./auth";
 import { Login } from "./views/Login";
@@ -14,7 +14,7 @@ import { connectRealtime, disconnectRealtime } from "./realtime";
 import { hydrateSearchIndex } from "./searchIndex";
 import { refreshAuth } from "./api";
 import { ensureDbUser } from "./db";
-import { CloudOff, Cloud, Settings, Sparkles, FileText, LogOut, KanbanSquare, ScrollText } from "lucide-react";
+import { CloudOff, Cloud, Settings, Sparkles, FileText, LogOut, KanbanSquare, ScrollText, UserCircle } from "lucide-react";
 
 export function App() {
   const auth = useAuth((s) => s.auth);
@@ -22,6 +22,16 @@ export function App() {
   const loggedIn = !!auth;
   const [pending, setPending] = useState(0);
   const [online, setOnline] = useState(navigator.onLine);
+  const [avatarOpen, setAvatarOpen] = useState(false);
+  const avatarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (avatarRef.current && !avatarRef.current.contains(e.target as Node)) setAvatarOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   // Effect hängt nur an loggedIn (boolean), NICHT am auth-Objekt.
   // refreshAuth() erzeugt immer neue Token-Objekte → würde als [auth]-Dep
@@ -93,10 +103,35 @@ export function App() {
         <div className="flex items-center gap-2 sm:gap-3 text-sm min-w-0">
           {online ? <Cloud size={16} className="text-emerald-400 shrink-0" /> : <CloudOff size={16} className="text-amber-400 shrink-0" />}
           {pending > 0 && <span className="whitespace-nowrap">{pending}</span>}
-          <span className="opacity-70 hidden sm:inline truncate max-w-[10rem]">{auth.email}</span>
-          <button onClick={() => setAuth(null)} className="opacity-70 hover:opacity-100 shrink-0" title="Logout">
-            <LogOut size={16} />
-          </button>
+          <div className="relative" ref={avatarRef}>
+            <button
+              onClick={() => setAvatarOpen((o) => !o)}
+              className="p-1 rounded-full hover:bg-slate-700 transition-colors"
+              title={auth.email}
+            >
+              <UserCircle size={22} />
+            </button>
+            {avatarOpen && (
+              <div className="absolute right-0 top-full mt-2 w-52 bg-white text-slate-800 rounded-lg shadow-lg z-50 py-1 text-sm">
+                <div className="px-3 py-2 border-b text-xs text-slate-500 truncate">{auth.email}</div>
+                {auth.role === "admin" && (
+                  <Link
+                    to="/admin"
+                    onClick={() => setAvatarOpen(false)}
+                    className="flex items-center gap-2 w-full px-3 py-2 hover:bg-slate-100"
+                  >
+                    <Settings size={16} /> Einstellungen
+                  </Link>
+                )}
+                <button
+                  onClick={() => { setAvatarOpen(false); setAuth(null); }}
+                  className="flex items-center gap-2 w-full text-left px-3 py-2 hover:bg-slate-100 text-red-600"
+                >
+                  <LogOut size={16} /> Abmelden
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
       <main className="flex-1 min-h-0 overflow-auto">
