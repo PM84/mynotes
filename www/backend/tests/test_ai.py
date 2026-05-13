@@ -322,7 +322,7 @@ async def test_extract_tasks_marks_removed_as_dnf(client: AsyncClient, auth_head
 
 
 async def test_memo_generate(client: AsyncClient, auth_headers: dict):
-    """Aktennotiz wird aus Notizinhalt generiert."""
+    """Aktennotiz wird aus Notizinhalt generiert und in DB gespeichert."""
     await _create_provider(client, auth_headers)
     nid = await _create_note(client, auth_headers, "Besprechung", "Ergebnis: alles gut.")
     StubAdapter.chat_response = "**Betreff:** Besprechung\n\nSachverhalt: alles gut."
@@ -330,7 +330,9 @@ async def test_memo_generate(client: AsyncClient, auth_headers: dict):
         "/ai/memo", json={"note_id": nid}, headers=auth_headers
     )
     assert r.status_code == 200, r.text
-    assert "Besprechung" in r.json()["memo"]
+    data = r.json()
+    assert "Besprechung" in data["content"]
+    assert "id" in data
     assert "Sachverhalt" in StubAdapter.last_chat_messages[0].content
 
 
@@ -348,9 +350,12 @@ async def test_memo_send_validates_email(client: AsyncClient, auth_headers: dict
     """Ungültige E-Mail-Adresse wird abgelehnt."""
     await _create_provider(client, auth_headers)
     nid = await _create_note(client, auth_headers, "Test", "Inhalt")
+    StubAdapter.chat_response = "Memo text"
+    gen = await client.post("/ai/memo", json={"note_id": nid}, headers=auth_headers)
+    memo_id = gen.json()["id"]
     r = await client.post(
         "/ai/memo/send",
-        json={"note_id": nid, "recipient": "ungültig", "memo_text": "Text"},
+        json={"memo_id": memo_id, "recipient": "ungültig"},
         headers=auth_headers,
     )
     assert r.status_code == 400
@@ -360,9 +365,12 @@ async def test_memo_send_503_when_smtp_not_configured(client: AsyncClient, auth_
     """Ohne SMTP-Konfiguration gibt es 503."""
     await _create_provider(client, auth_headers)
     nid = await _create_note(client, auth_headers, "Test", "Inhalt")
+    StubAdapter.chat_response = "Memo text"
+    gen = await client.post("/ai/memo", json={"note_id": nid}, headers=auth_headers)
+    memo_id = gen.json()["id"]
     r = await client.post(
         "/ai/memo/send",
-        json={"note_id": nid, "recipient": "test@example.com", "memo_text": "Aktennotiz-Text"},
+        json={"memo_id": memo_id, "recipient": "test@example.com"},
         headers=auth_headers,
     )
     # SMTP_HOST ist leer → RuntimeError → 503
@@ -380,9 +388,12 @@ async def test_memo_send_saves_recent_address(client: AsyncClient, auth_headers:
 
     await _create_provider(client, auth_headers)
     nid = await _create_note(client, auth_headers, "Notiz", "Inhalt")
+    StubAdapter.chat_response = "Memo"
+    gen = await client.post("/ai/memo", json={"note_id": nid}, headers=auth_headers)
+    memo_id = gen.json()["id"]
     r = await client.post(
         "/ai/memo/send",
-        json={"note_id": nid, "recipient": "alice@example.com", "memo_text": "Memo"},
+        json={"memo_id": memo_id, "recipient": "alice@example.com"},
         headers=auth_headers,
     )
     assert r.status_code == 200, r.text
@@ -405,11 +416,14 @@ async def test_memo_addresses_max_three(client: AsyncClient, auth_headers: dict,
 
     await _create_provider(client, auth_headers)
     nid = await _create_note(client, auth_headers, "N", "I")
+    StubAdapter.chat_response = "M"
 
     for addr in ["a@x.com", "b@x.com", "c@x.com", "d@x.com"]:
+        gen = await client.post("/ai/memo", json={"note_id": nid}, headers=auth_headers)
+        memo_id = gen.json()["id"]
         r = await client.post(
             "/ai/memo/send",
-            json={"note_id": nid, "recipient": addr, "memo_text": "M"},
+            json={"memo_id": memo_id, "recipient": addr},
             headers=auth_headers,
         )
         assert r.status_code == 200, r.text

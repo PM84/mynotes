@@ -127,11 +127,18 @@ class AIMemoIn(BaseModel):
 
 
 class AIMemoSendIn(BaseModel):
-    note_id: uuid.UUID
+    memo_id: uuid.UUID  # Referenz auf gespeichertes Memo
     recipient: str  # E-Mail-Adresse
-    memo_text: str  # Vom Frontend übernommener (ggf. editierter) Text
-    image_b64: str | None = None
-    mime: str | None = None
+
+
+# ---------- Memos ----------
+
+class MemoOut(BaseModel):
+    id: uuid.UUID
+    note_id: uuid.UUID | None
+    note_title: str | None = None
+    content: str
+    created_at: datetime
 
 
 class ProviderIn(BaseModel):

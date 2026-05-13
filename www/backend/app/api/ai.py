@@ -18,6 +18,7 @@ from ..models import Note, User
 from ..schemas import (
     AIContradictionsIn, AIRagIn, AIRagOut, AISummarizeIn,
     AICanvasIn, AIExtractTasksIn, AIMemoIn, AIMemoSendIn,
+    MemoOut,
 )
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -407,7 +408,11 @@ async def generate_memo(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Generiert eine Aktennotiz (Memo) aus einer Notiz via KI."""
+    """Generiert eine Aktennotiz (Memo) aus einer Notiz via KI und speichert sie."""
+    from ..deps import get_default_workspace
+    from ..models import Memo
+
+    ws = await get_default_workspace(user, session)
     text = await _single_note_text(session, data.note_id)
     prompt = load("memo").format(content=text)
 
@@ -423,21 +428,42 @@ async def generate_memo(
             "Berücksichtige dessen Inhalt in der Aktennotiz."
         )
         try:
-            memo = await client.vision(
+            memo_text = await client.vision(
                 data.image_b64, data.mime, vision_prompt, model=row.vision_model
             )
         except httpx.HTTPStatusError as e:
             raise _http_to_status(e)
-        return {"memo": memo}
+    else:
+        row, client = await _get_active_or_400(session, "chat")
+        if not row.chat_model:
+            raise HTTPException(400, "no chat_model on active provider")
+        try:
+            resp = await client.chat([Message(role="user", content=prompt)], model=row.chat_model)
+        except httpx.HTTPStatusError as e:
+            raise _http_to_status(e)
+        memo_text = resp.text
 
-    row, client = await _get_active_or_400(session, "chat")
-    if not row.chat_model:
-        raise HTTPException(400, "no chat_model on active provider")
-    try:
-        resp = await client.chat([Message(role="user", content=prompt)], model=row.chat_model)
-    except httpx.HTTPStatusError as e:
-        raise _http_to_status(e)
-    return {"memo": resp.text}
+    memo = Memo(
+        workspace_id=ws.id,
+        note_id=data.note_id.bytes,
+        content=memo_text,
+    )
+    session.add(memo)
+    await session.commit()
+    await session.refresh(memo)
+
+    # Notiz-Titel für Antwort laden
+    n = await session.get(Note, data.note_id.bytes)
+    note_title = n.title if n else None
+
+    memo_id = uuid.UUID(bytes=memo.id)
+    return {
+        "id": str(memo_id),
+        "note_id": str(data.note_id),
+        "note_title": note_title,
+        "content": memo_text,
+        "created_at": memo.created_at.isoformat(),
+    }
 
 
 @router.post("/memo/send")
@@ -446,30 +472,30 @@ async def send_memo(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Sendet eine Aktennotiz per E-Mail und speichert die Empfänger-Adresse."""
+    """Sendet ein gespeichertes Memo per E-Mail."""
     import re
     from ..email import send_email
+    from ..models import Memo
 
-    # Einfache E-Mail-Validierung
     if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", data.recipient):
         raise HTTPException(400, "Ungültige E-Mail-Adresse")
 
-    # Notiz-Titel für Betreff holen
-    n = await session.get(Note, data.note_id.bytes)
-    if not n:
-        raise HTTPException(404, "note not found")
+    memo = await session.get(Memo, data.memo_id.bytes)
+    if not memo:
+        raise HTTPException(404, "memo not found")
 
-    subject = f"Aktennotiz: {n.title}"
+    # Notiz-Titel für Betreff holen
+    n = await session.get(Note, memo.note_id) if memo.note_id else None
+    subject = f"Aktennotiz: {n.title}" if n else "Aktennotiz"
+
     try:
-        await send_email(session, data.recipient, subject, data.memo_text)
+        await send_email(session, data.recipient, subject, memo.content)
     except RuntimeError as e:
         raise HTTPException(503, str(e))
     except Exception as e:
         raise HTTPException(502, f"E-Mail-Versand fehlgeschlagen: {e}")
 
-    # Empfänger in Recent-Liste speichern
     await _save_recent_email(session, user, data.recipient)
-
     return {"ok": True}
 
 
@@ -508,3 +534,66 @@ async def get_recent_emails(
     if not isinstance(entries, list):
         entries = []
     return {"addresses": [e.get("email", "") for e in entries[:3]]}
+
+
+@router.get("/memos", response_model=list[MemoOut])
+async def list_memos(
+    q: str = "",
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[MemoOut]:
+    """Alle Memos des Benutzers auflisten, optional nach Suchbegriff filtern."""
+    from ..deps import get_default_workspace
+    from ..models import Memo
+
+    ws = await get_default_workspace(user, session)
+    stmt = (
+        select(Memo)
+        .where(Memo.workspace_id == ws.id)
+        .order_by(Memo.created_at.desc())
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+
+    result: list[MemoOut] = []
+    for m in rows:
+        # Notiz-Titel laden
+        note_title = None
+        if m.note_id:
+            n = await session.get(Note, m.note_id)
+            if n:
+                note_title = n.title
+
+        # Suchfilter (case-insensitive auf content + note_title)
+        if q:
+            ql = q.lower()
+            if ql not in m.content.lower() and (not note_title or ql not in note_title.lower()):
+                continue
+
+        result.append(MemoOut(
+            id=uuid.UUID(bytes=m.id),
+            note_id=uuid.UUID(bytes=m.note_id) if m.note_id else None,
+            note_title=note_title,
+            content=m.content,
+            created_at=m.created_at,
+        ))
+
+    return result
+
+
+@router.delete("/memos/{memo_id}")
+async def delete_memo(
+    memo_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Löscht ein Memo."""
+    from ..deps import get_default_workspace
+    from ..models import Memo
+
+    ws = await get_default_workspace(user, session)
+    memo = await session.get(Memo, memo_id.bytes)
+    if not memo or memo.workspace_id != ws.id:
+        raise HTTPException(404, "memo not found")
+    await session.delete(memo)
+    await session.commit()
+    return {"ok": True}

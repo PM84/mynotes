@@ -166,6 +166,19 @@ class Task(Base):
     )
 
 
+class Memo(Base):
+    __tablename__ = "memos"
+    id: Mapped[bytes] = mapped_column(BINARY(16), primary_key=True, default=uuid_bytes)
+    workspace_id: Mapped[bytes] = mapped_column(BINARY(16), ForeignKey("workspaces.id"), index=True)
+    note_id: Mapped[bytes | None] = mapped_column(BINARY(16), ForeignKey("notes.id", ondelete="SET NULL"), nullable=True, index=True)
+    content: Mapped[str] = mapped_column(MEDIUMTEXT)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_memos_workspace_created", "workspace_id", "created_at"),
+    )
+
+
 class AppSetting(Base):
     """Globale, zur Laufzeit veränderbare Konfiguration (Key/Value, JSON-Wert)."""
     __tablename__ = "app_settings"

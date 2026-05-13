@@ -38,6 +38,7 @@ def event_loop():
 
 
 TABLES_TO_TRUNCATE = [
+    "memos",
     "pending_jobs",
     "ai_cache",
     "note_chunks",

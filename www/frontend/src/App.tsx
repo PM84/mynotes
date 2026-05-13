@@ -8,12 +8,13 @@ import { AssetViewer } from "./views/AssetViewer";
 import { AISearch } from "./views/AISearch";
 import { Admin } from "./views/Admin";
 import { Tasks } from "./views/Tasks";
+import { Memos } from "./views/Memos";
 import { onSyncChange, pendingCount, pullAll, trySync } from "./sync";
 import { connectRealtime, disconnectRealtime } from "./realtime";
 import { hydrateSearchIndex } from "./searchIndex";
 import { refreshAuth } from "./api";
 import { ensureDbUser } from "./db";
-import { CloudOff, Cloud, Settings, Sparkles, FileText, LogOut, KanbanSquare } from "lucide-react";
+import { CloudOff, Cloud, Settings, Sparkles, FileText, LogOut, KanbanSquare, ScrollText } from "lucide-react";
 
 export function App() {
   const auth = useAuth((s) => s.auth);
@@ -85,6 +86,7 @@ export function App() {
           <Link to="/" className="font-bold text-sm sm:text-base whitespace-nowrap">MyNotes</Link>
           <NavLink to="/" icon={<FileText size={16} />} label="Notizen" />
           <NavLink to="/tasks" icon={<KanbanSquare size={16} />} label="Aufgaben" />
+          <NavLink to="/memos" icon={<ScrollText size={16} />} label="Memos" />
           <NavLink to="/ai" icon={<Sparkles size={16} />} label="KI-Suche" />
           {auth.role === "admin" && <NavLink to="/admin" icon={<Settings size={16} />} label="Admin" />}
         </div>
@@ -101,6 +103,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<Notes />} />
           <Route path="/tasks" element={<Tasks />} />
+          <Route path="/memos" element={<Memos />} />
           <Route path="/notes/:id" element={<NoteEditor />} />
           <Route path="/assets/:id" element={<AssetViewer />} />
           <Route path="/ai" element={<AISearch />} />
