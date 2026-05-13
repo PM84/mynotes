@@ -91,13 +91,17 @@ export function NoteEditor() {
       // ungespeicherte Zeichnungen, w\u00e4hrend `note.excalidraw` erst nach
       // dem n\u00e4chsten Dexie-Roundtrip aktualisiert ist.
       const src = excaliRef.current ?? note?.excalidraw;
+      const savedAppState = src?.appState ?? {};
+      // Default-Zoom auf 90 % absenken, gespeicherten Zoom beibehalten.
+      const zoom = savedAppState.zoom ?? { value: 0.9 };
       return {
         elements: src?.elements ?? [],
         appState: {
           // Stift-First: Freihand-Werkzeug + Pen-Mode (Palm-Rejection) aktiv
           currentItemStrokeWidth: 1,
           gridModeEnabled: true,
-          ...(src?.appState ?? {}),
+          ...savedAppState,
+          zoom,
           activeTool: { type: "freedraw", lastActiveTool: null, locked: false, customType: null },
           penMode: true,
           penDetected: true,
