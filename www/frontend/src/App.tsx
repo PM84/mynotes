@@ -17,26 +17,29 @@ import { CloudOff, Cloud, Settings, Sparkles, FileText, LogOut, KanbanSquare } f
 export function App() {
   const auth = useAuth((s) => s.auth);
   const setAuth = useAuth((s) => s.setAuth);
+  const loggedIn = !!auth;
   const [pending, setPending] = useState(0);
   const [online, setOnline] = useState(navigator.onLine);
 
-  // Einmalig beim Laden: Token auffrischen (Session verlängern).
-  // Bewusst NICHT im [auth]-Effect, da refreshAuth() neue Tokens setzt und
-  // damit auth ändert → Endlosschleife.
+  // Effect hängt nur an loggedIn (boolean), NICHT am auth-Objekt.
+  // refreshAuth() erzeugt immer neue Token-Objekte → würde als [auth]-Dep
+  // eine Endlosschleife auslösen.
   useEffect(() => {
-    if (useAuth.getState().auth) {
-      void refreshAuth();
+    if (!loggedIn) {
+      disconnectRealtime();
+      return;
     }
-  }, []);
 
-  useEffect(() => {
+    // Einmalig Token auffrischen (Session verlängern).
+    void refreshAuth();
+
     const upd = async () => setPending(await pendingCount());
     const off = onSyncChange(upd);
     void upd();
     const onOnline = () => { setOnline(true); void trySync().then(() => pullAll()); };
     const onOffline = () => setOnline(false);
     const onVisible = () => {
-      if (document.visibilityState === "visible" && auth) {
+      if (document.visibilityState === "visible" && useAuth.getState().auth) {
         void refreshAuth();
         void pullAll();
         void trySync();
@@ -46,20 +49,18 @@ export function App() {
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
     document.addEventListener("visibilitychange", onVisible);
-    if (auth) {
-      void pullAll();
-      void hydrateSearchIndex();
-      connectRealtime();
-    } else {
-      disconnectRealtime();
-    }
+
+    void pullAll();
+    void hydrateSearchIndex();
+    connectRealtime();
+
     return () => {
       off();
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [auth]);
+  }, [loggedIn]);
 
   if (!auth) {
     return (

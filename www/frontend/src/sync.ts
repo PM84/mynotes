@@ -370,13 +370,48 @@ export const pullTopLevel = pullAll;
 
 /**
  * Vollständiger Pull (rekursiv, inkl. Tombstones).
+ * Throttled: läuft höchstens einmal alle 2 s, parallele Aufrufe werden
+ * zusammengefasst (einer wird nachgeholt sobald der aktive fertig ist).
+ */
+let _pulling = false;
+let _pullQueued = false;
+const PULL_THROTTLE_MS = 2000;
+let _lastPull = 0;
+
+export async function pullAll() {
+  const now = Date.now();
+  if (_pulling || now - _lastPull < PULL_THROTTLE_MS) {
+    _pullQueued = true;
+    return;
+  }
+  _pulling = true;
+  _lastPull = now;
+  try {
+    await _pullAllImpl();
+  } finally {
+    _pulling = false;
+    if (_pullQueued) {
+      _pullQueued = false;
+      // Nächsten Pull frühestens nach Ablauf der Throttle-Sperre starten.
+      const wait = PULL_THROTTLE_MS - (Date.now() - _lastPull);
+      if (wait > 0) {
+        setTimeout(() => void pullAll(), wait);
+      } else {
+        void pullAll();
+      }
+    }
+  }
+}
+
+/**
+ * Interne Implementierung – wird von pullAll() throttled aufgerufen.
  * – Aktualisiert lokal vorhandene Notes, wenn Server neuer ist und lokal
  *   nichts dirty ist.
  * – Fügt neue Notes ein.
  * – Löscht lokale Notes, die der Server als deleted_at meldet (oder die
  *   nicht mehr in der Liste auftauchen) – sofern lokal nicht dirty.
  */
-export async function pullAll() {
+async function _pullAllImpl() {
   if (!navigator.onLine) return;
   try {
     const remote = await api<ServerNote[]>("/notes?all=1&include_deleted=1");
