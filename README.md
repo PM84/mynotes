@@ -57,6 +57,7 @@ Standard-Admin: `admin@mynotes.localhost` / `admin`
 | `bindev/test-frontend.sh` | Vitest im Frontend-Container |
 | `bindev/backup.sh [zielordner]` | DB-Dump + Assets als `mynotes-backup-YYYYMMDD-HHMMSS.tar.gz` |
 | `bindev/restore.sh <archiv>` | Backup einspielen (DB drop+create, Assets ersetzen) |
+| `bindev/backup-nextcloud.sh` | Backup erstellen und via WebDAV in Nextcloud hochladen (für Cronjob) |
 
 ### Health-Endpunkte
 
@@ -78,6 +79,64 @@ Standard-Admin: `admin@mynotes.localhost` / `admin`
 2. Adapter wählen, Base-URL, API-Key, Modelle eintragen.
 3. Aktivflags setzen (genau ein Provider je Capability).
 4. "Test" prüft Erreichbarkeit (Health-Endpunkt des Anbieters).
+
+### Automatisches Backup (Nextcloud / WebDAV)
+
+MyNotes kann täglich ein vollständiges ZIP-Backup (DB-Dump + Assets) erstellen und
+per WebDAV in eine Nextcloud-Instanz hochladen. Ältere Backups werden automatisch
+bereinigt (Retention).
+
+#### 1. Backup in der Admin-UI konfigurieren
+
+1. Als Admin anmelden → **Admin** → Abschnitt **Automatisches Backup (Nextcloud)**.
+2. **Backup aktiviert** anhaken.
+3. Nextcloud-Felder ausfüllen:
+
+| Feld | Beispiel | Beschreibung |
+|---|---|---|
+| Nextcloud-URL | `https://cloud.example.com` | Basis-URL der Nextcloud-Instanz |
+| Benutzer | `admin` | Nextcloud-Login |
+| Passwort | `••••` | App-Passwort oder normales Passwort |
+| Backup-Pfad | `/mynotes-backups` | Ordner in Nextcloud (wird automatisch angelegt) |
+| Aufbewahrung (Tage) | `7` | Anzahl der Backups, die behalten werden |
+
+4. **Backup-Einstellungen speichern** klicken.
+
+> **Tipp**: In Nextcloud lässt sich unter *Einstellungen → Sicherheit* ein
+> App-Passwort erstellen – das ist sicherer als das Hauptpasswort.
+
+#### 2. Cronjob einrichten
+
+Das Skript `bindev/backup-nextcloud.sh` liest die Einstellungen aus der
+Datenbank und führt das Backup aus. Es eignet sich ideal als Cronjob:
+
+```sh
+# Tägliches Backup um 03:00 Uhr
+crontab -e
+```
+
+Folgende Zeile einfügen (Pfad anpassen):
+
+```cron
+0 3 * * * /home/peter/dev/mynotes/bindev/backup-nextcloud.sh >> /var/log/mynotes-backup.log 2>&1
+```
+
+**Hinweise:**
+
+- Der Docker-Stack muss laufen, da das Skript `docker compose exec` nutzt.
+- Die Logausgabe wird in `/var/log/mynotes-backup.log` geschrieben.
+- Ist das Backup in der Admin-UI deaktiviert oder sind die Credentials
+  unvollständig, beendet sich das Skript ohne Fehler.
+
+#### 3. Manuelles Backup auslösen
+
+```sh
+# Via Skript (nutzt die Admin-UI-Einstellungen):
+bindev/backup-nextcloud.sh
+
+# Oder nur ein lokales ZIP herunterladen (Admin-API):
+curl -H "Authorization: Bearer <TOKEN>" https://api.mynotes.localhost/admin/backup -o backup.zip
+```
 
 ## Produktion
 
