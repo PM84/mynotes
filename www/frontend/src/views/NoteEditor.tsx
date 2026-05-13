@@ -90,6 +90,7 @@ export function NoteEditor() {
         appState: {
           // Stift-First: Freihand-Werkzeug + Pen-Mode (Palm-Rejection) aktiv
           currentItemStrokeWidth: 1,
+          gridModeEnabled: true,
           ...(src?.appState ?? {}),
           activeTool: { type: "freedraw", lastActiveTool: null, locked: false, customType: null },
           penMode: true,
@@ -155,7 +156,10 @@ export function NoteEditor() {
       }
       excaliRef.current = {
         elements,
-        appState: { viewBackgroundColor: appState?.viewBackgroundColor },
+        appState: {
+          viewBackgroundColor: appState?.viewBackgroundColor,
+          gridModeEnabled: appState?.gridModeEnabled ?? true,
+        },
         files: Object.keys(cleanFiles).length > 0 ? cleanFiles : null,
       };
       // Live-Broadcast (200 ms) – nur wenn die Änderung lokal entstanden ist.
