@@ -96,6 +96,31 @@ export async function deleteNoteLocal(id: string) {
   void trySync();
 }
 
+/** Liefert alle direkten Kinder einer Notiz (nicht gelöscht). */
+export async function getChildren(parentId: string) {
+  const all = await db.notes.toArray();
+  return all.filter((n) => !n.deleted && n.parent_id === parentId);
+}
+
+/** Löscht eine Notiz und rekursiv alle Unternotizen. */
+export async function deleteNoteRecursive(id: string) {
+  const children = await getChildren(id);
+  for (const child of children) {
+    await deleteNoteRecursive(child.id);
+  }
+  await deleteNoteLocal(id);
+}
+
+/** Schiebt alle Kinder einer Notiz eine Ebene höher (zum parent des Eltern-Knotens). */
+export async function reparentChildren(id: string) {
+  const n = await db.notes.get(id);
+  const newParent = n?.parent_id ?? null;
+  const children = await getChildren(id);
+  for (const child of children) {
+    await upsertNoteLocal({ id: child.id, parent_id: newParent });
+  }
+}
+
 // ---------- Asset offline storage ----------
 
 export async function storeAssetLocal(file: File): Promise<string> {
@@ -186,24 +211,172 @@ export async function pendingCount() {
   return db.pending.count();
 }
 
+// ---------- Batch sync ----------
+
+type BatchResult = {
+  ok?: boolean;
+  id?: string;
+  error?: string;
+  conflict?: boolean;
+  server?: any;
+  data?: any;
+};
+
+const BATCH_SIZE = 50;
+
+/**
+ * Dedupliziert Pending-Ops für effizienteren Batch-Sync:
+ * - Mehrere Upserts für dieselbe Entität → letzten Datenstand + erstes
+ *   client_updated_at behalten
+ * - Delete nach Upsert(s) → nur Delete senden
+ */
+function deduplicateOps(ops: PendingOp[]): {
+  ops: PendingOp[];
+  consumedIds: Map<PendingOp, number[]>;
+} {
+  const groups = new Map<string, PendingOp[]>();
+  for (const op of ops) {
+    const entityType = op.type.startsWith("note.") ? "note" : "task";
+    const key = `${entityType}:${op.payload.id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(op);
+  }
+  const result: PendingOp[] = [];
+  const consumedIds = new Map<PendingOp, number[]>();
+  for (const [, entityOps] of groups) {
+    const allIds = entityOps.map((o) => o.id!);
+    const last = entityOps[entityOps.length - 1];
+    if (last.type.endsWith(".delete")) {
+      // Delete ist die finale Aktion – alle Upserts davor ignorieren
+      result.push(last);
+      consumedIds.set(last, allIds);
+    } else {
+      const upserts = entityOps.filter((o) => o.type.endsWith(".upsert"));
+      if (upserts.length > 1) {
+        // Merge: letzter Datenstand + erstes client_updated_at (Server-Baseline)
+        const merged: PendingOp = {
+          ...last,
+          payload: {
+            ...last.payload,
+            data: {
+              ...last.payload.data,
+              client_updated_at: upserts[0].payload?.data?.client_updated_at,
+            },
+          },
+        };
+        result.push(merged);
+        consumedIds.set(merged, allIds);
+      } else {
+        result.push(last);
+        consumedIds.set(last, allIds);
+      }
+    }
+  }
+  return { ops: result, consumedIds };
+}
+
 export async function trySync() {
   if (syncing) return;
   if (!navigator.onLine) { notify(); return; }
   syncing = true;
   notify();
   try {
+    // 1. Asset-Uploads einzeln verarbeiten (FormData, kein Batch möglich)
     while (true) {
-      const op = await db.pending.orderBy("id").first();
+      const op = await db.pending.where("type").equals("asset.upload").first();
       if (!op) break;
       try {
         await runOp(op);
         await db.pending.delete(op.id!);
         notify();
       } catch (e) {
-        console.warn("sync op failed", op, e);
-        // Bei 401/403 abbrechen; sonst nach 5s nochmal
+        console.warn("asset upload failed", op, e);
         break;
       }
+    }
+    // 2. Verbleibende Ops (Notes + Tasks) sammeln und deduplizieren
+    const allOps = (await db.pending.orderBy("id").toArray()).filter(
+      (op) => op.type !== "asset.upload",
+    );
+    if (!allOps.length) return;
+    const { ops: deduped, consumedIds } = deduplicateOps(allOps);
+    // 3. In Batches an /sync/batch senden
+    for (let i = 0; i < deduped.length; i += BATCH_SIZE) {
+      const batch = deduped.slice(i, i + BATCH_SIZE);
+      const payload = batch.map((op) => ({
+        type: op.type,
+        id: op.payload.id,
+        data: op.payload.data,
+      }));
+      let results: BatchResult[];
+      try {
+        const res = await apiJson<{ results: BatchResult[] }>("/sync/batch", "POST", payload);
+        results = res.results;
+      } catch (e) {
+        console.warn("batch sync failed", e);
+        break;
+      }
+      // 4. Ergebnisse verarbeiten
+      for (let j = 0; j < batch.length; j++) {
+        const op = batch[j];
+        const r = results?.[j];
+        if (!r) continue;
+        const ids = consumedIds.get(op) || [op.id!];
+        if (r.conflict && r.server) {
+          // Konflikt – Server gewinnt
+          if (op.type === "note.upsert") {
+            const s = r.server as ServerNote;
+            await db.notes.put({
+              id: s.id, parent_id: s.parent_id, title: s.title,
+              body_md: s.body_md, excalidraw: s.excalidraw,
+              ocr_text: s.ocr_text, tags: s.tags,
+              updated_at: s.updated_at, dirty: 0,
+              deleted: s.deleted_at ? 1 : 0,
+            });
+            conflictHandler?.(s.id, s);
+          } else if (op.type === "task.upsert") {
+            const s = r.server as ServerTask;
+            await db.tasks.put({
+              id: s.id, note_id: s.note_id, title: s.title,
+              description: s.description, status: s.status as any,
+              priority: s.priority, position: s.position,
+              due_date: s.due_date, updated_at: s.updated_at,
+              dirty: 0, deleted: s.deleted_at ? 1 : 0,
+            });
+          }
+          for (const id of ids) await db.pending.delete(id);
+        } else if (r.ok) {
+          // Erfolg – lokalen State aktualisieren
+          for (const id of ids) await db.pending.delete(id);
+          if (op.type === "note.upsert" && r.data) {
+            const n = await db.notes.get(op.payload.id);
+            if (n) {
+              if (r.data.updated_at) n.updated_at = r.data.updated_at;
+              const remaining = await db.pending
+                .filter((p) => p.type === "note.upsert" && p.payload?.id === op.payload.id)
+                .count();
+              n.dirty = remaining > 0 ? 1 : 0;
+              await db.notes.put(n);
+            }
+          } else if (op.type === "task.upsert" && r.data) {
+            const t = await db.tasks.get(op.payload.id);
+            if (t) {
+              if (r.data.updated_at) t.updated_at = r.data.updated_at;
+              const remaining = await db.pending
+                .filter((p) => p.type === "task.upsert" && p.payload?.id === op.payload.id)
+                .count();
+              t.dirty = remaining > 0 ? 1 : 0;
+              await db.tasks.put(t);
+            }
+          } else if (op.type === "note.delete") {
+            await db.notes.delete(op.payload.id);
+          } else if (op.type === "task.delete") {
+            await db.tasks.delete(op.payload.id);
+          }
+        }
+        // Bei r.error (kein Konflikt): Ops bleiben in pending für Retry
+      }
+      notify();
     }
   } finally {
     syncing = false;

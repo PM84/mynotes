@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.notes import upsert_note
@@ -29,7 +29,7 @@ async def batch(
       { "type": "note.delete", "id": "<uuid>" }
       { "type": "task.upsert", "id": "<uuid>", "data": {...} }
       { "type": "task.delete", "id": "<uuid>" }
-    Liefert pro Op { ok | error }.
+    Liefert pro Op { ok, id, data? } oder { error, id?, conflict?, server? }.
     """
     results: list[dict] = []
     for op in ops:
@@ -39,8 +39,8 @@ async def batch(
                 nid = uuid.UUID(op["id"])
                 from fastapi import BackgroundTasks
                 bg = BackgroundTasks()
-                await upsert_note(nid, NoteIn(**op["data"]), bg, session, user)
-                results.append({"ok": True, "id": str(nid)})
+                out = await upsert_note(nid, NoteIn(**op["data"]), bg, session, user)
+                results.append({"ok": True, "id": str(nid), "data": out.model_dump(mode="json")})
             elif t == "note.delete":
                 from ..api.notes import delete_note as del_n
                 nid = uuid.UUID(op["id"])
@@ -48,8 +48,8 @@ async def batch(
                 results.append({"ok": True, "id": str(nid)})
             elif t == "task.upsert":
                 tid = uuid.UUID(op["id"])
-                await upsert_task(tid, TaskIn(**op["data"]), session, user)
-                results.append({"ok": True, "id": str(tid)})
+                out = await upsert_task(tid, TaskIn(**op["data"]), session, user)
+                results.append({"ok": True, "id": str(tid), "data": out.model_dump(mode="json")})
             elif t == "task.delete":
                 from ..api.tasks import delete_task as del_t
                 tid = uuid.UUID(op["id"])
@@ -57,6 +57,12 @@ async def batch(
                 results.append({"ok": True, "id": str(tid)})
             else:
                 results.append({"error": f"unknown op {t}"})
+        except HTTPException as he:
+            r: dict = {"error": str(he.detail), "id": op.get("id")}
+            if he.status_code == 409 and isinstance(he.detail, dict):
+                r["conflict"] = True
+                r["server"] = he.detail.get("server")
+            results.append(r)
         except Exception as e:
             results.append({"error": str(e)})
     return {"results": results}
