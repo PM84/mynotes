@@ -79,7 +79,7 @@ class OpenAIAdapter(AIProviderClient):
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_b64}"}},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_b64}", "detail": "high"}},
                     ],
                 }
             ],

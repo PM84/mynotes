@@ -162,10 +162,14 @@ async def rag(
 
 CANVAS_TASKS = {
     "transcribe": (
-        "Transkribiere den Inhalt möglichst wortgetreu. Handgeschriebener Text wird zu "
-        "Markdown-Fließtext, gezeichnete Listen zu Markdown-Listen, Tabellen zu "
-        "Markdown-Tabellen, Formeln in LaTeX. Diagramm-Strukturen als Mermaid-Block, "
-        "wenn möglich, sonst als beschriftete Liste."
+        "Transkribiere den Inhalt möglichst wortgetreu und vollständig. "
+        "Handgeschriebener Text wird zu Markdown-Fließtext, gezeichnete Listen zu "
+        "Markdown-Listen, Tabellen zu Markdown-Tabellen, Formeln in LaTeX ($...$). "
+        "Diagramm-Strukturen als Mermaid-Block, wenn möglich, sonst als beschriftete "
+        "Liste. Nutze den Kontext umliegender Wörter, um schwer lesbare Stellen zu "
+        "erschließen. Korrigiere KEINE Rechtschreibung – gib den Text exakt so "
+        "wieder, wie er geschrieben wurde. Markiere wirklich unleserliche Stellen "
+        "mit [unleserlich]."
     ),
     "summary": (
         "Erstelle eine prägnante, inhaltlich-semantische Zusammenfassung der "
