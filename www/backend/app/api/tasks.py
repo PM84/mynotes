@@ -60,6 +60,35 @@ async def list_tasks(
     return [to_out(t) for t in rows]
 
 
+# ---------- Kanban-Spalten ----------
+# WICHTIG: /columns muss VOR /{task_id} stehen, sonst matcht FastAPI
+# "columns" als task_id (UUID-Validierung schlägt fehl → 422).
+
+@router.get("/columns")
+async def get_columns(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    cols = await get_setting(session, "kanban_columns", DEFAULT_COLUMNS)
+    if not isinstance(cols, list):
+        return DEFAULT_COLUMNS
+    return cols
+
+
+@router.put("/columns")
+async def set_columns(
+    payload: list[dict[str, Any]],
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    # Validate structure
+    for col in payload:
+        if not col.get("id") or not col.get("title"):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "each column needs id and title")
+    await set_setting(session, "kanban_columns", payload)
+    return payload
+
+
 @router.get("/{task_id}", response_model=TaskOut)
 async def get_task(
     task_id: uuid.UUID,
@@ -138,30 +167,3 @@ async def delete_task(
     await session.commit()
     await broadcast_user(user.id, {"type": "task.delete", "id": str(task_id)})
     return {"ok": True}
-
-
-# ---------- Kanban-Spalten ----------
-
-@router.get("/columns")
-async def get_columns(
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
-) -> list[dict]:
-    cols = await get_setting(session, "kanban_columns", DEFAULT_COLUMNS)
-    if not isinstance(cols, list):
-        return DEFAULT_COLUMNS
-    return cols
-
-
-@router.put("/columns")
-async def set_columns(
-    payload: list[dict[str, Any]],
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
-) -> list[dict]:
-    # Validate structure
-    for col in payload:
-        if not col.get("id") or not col.get("title"):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "each column needs id and title")
-    await set_setting(session, "kanban_columns", payload)
-    return payload
