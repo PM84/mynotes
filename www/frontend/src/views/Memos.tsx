@@ -258,7 +258,7 @@ export function Memos() {
                       </div>
                       {m.content.length > 200 && (
                         <button
-                          className="text-xs text-blue-500 hover:underline mt-1"
+                          className="text-xs text-blue-500 hover:underline mt-1 print:hidden"
                           onClick={() => setExpandedId(isExpanded ? null : m.id)}
                         >
                           {isExpanded ? "Weniger anzeigen" : "Mehr anzeigen"}

@@ -510,10 +510,16 @@ async def send_memo(
     note_path = await _note_path(session, n) if n else None
     subject = f"Aktennotiz: {note_path}" if note_path else "Aktennotiz"
 
-    body_html = md.markdown(memo.content, extensions=["tables", "fenced_code"])
+    # Strip wrapping ```markdown ... ``` code fences the AI sometimes adds
+    content = memo.content.strip()
+    if re.match(r"^```\w*\s*\n", content) and content.endswith("```"):
+        content = re.sub(r"^```\w*\s*\n", "", content)
+        content = content[: -len("```")].strip()
+
+    body_html = md.markdown(content, extensions=["tables", "fenced_code"])
 
     try:
-        await send_email(session, data.recipient, subject, memo.content, body_html)
+        await send_email(session, data.recipient, subject, content, body_html)
     except RuntimeError as e:
         raise HTTPException(503, str(e))
     except Exception as e:
