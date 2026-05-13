@@ -346,7 +346,8 @@ export async function trySync() {
               id: s.id, note_id: s.note_id, title: s.title,
               description: s.description, status: s.status as any,
               priority: s.priority, position: s.position,
-              due_date: s.due_date, updated_at: s.updated_at,
+              due_date: s.due_date, tags: s.tags, closed_at: s.closed_at,
+              updated_at: s.updated_at,
               dirty: 0, deleted: s.deleted_at ? 1 : 0,
             });
           }
@@ -509,6 +510,8 @@ async function runOp(op: PendingOp) {
             priority: server.priority,
             position: server.position,
             due_date: server.due_date,
+            tags: server.tags,
+            closed_at: server.closed_at,
             updated_at: server.updated_at,
             dirty: 0,
             deleted: server.deleted_at ? 1 : 0,

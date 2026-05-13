@@ -7,7 +7,7 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   globalThis.fetch = fetchMock as any;
   fetchMock.mockReset();
-  useAuth.getState().setAuth({ access: "tok", refresh: "r", email: "a@b.c" });
+  useAuth.getState().setAuth({ access: "tok", refresh: "r", email: "a@b.c", role: "admin", userId: "test-uid" });
 });
 
 afterEach(() => {
