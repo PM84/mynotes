@@ -107,32 +107,33 @@ bereinigt (Retention).
 
 #### 2. Cronjob einrichten
 
-Das Skript `bindev/backup-nextcloud.sh` liest die Einstellungen aus der
-Datenbank und führt das Backup aus. Es eignet sich ideal als Cronjob:
+Das Backup-CLI läuft im Backend-Container. Auf dem Host-System wird ein
+Cronjob eingerichtet, der per `docker compose exec` den Befehl im
+laufenden Container ausführt:
 
 ```sh
-# Tägliches Backup um 03:00 Uhr
 crontab -e
 ```
 
-Folgende Zeile einfügen (Pfad anpassen):
+Folgende Zeile einfügen (Pfade anpassen):
 
 ```cron
-0 3 * * * /home/peter/dev/mynotes/bindev/backup-nextcloud.sh >> /var/log/mynotes-backup.log 2>&1
+0 3 * * * cd /home/peter/dev/mynotes && docker compose exec -T backend python -m app.backup_cli >> /var/log/mynotes-backup.log 2>&1
 ```
 
 **Hinweise:**
 
-- Der Docker-Stack muss laufen, da das Skript `docker compose exec` nutzt.
+- Der Docker-Stack muss laufen, da der Befehl im Backend-Container ausgeführt wird.
 - Die Logausgabe wird in `/var/log/mynotes-backup.log` geschrieben.
 - Ist das Backup in der Admin-UI deaktiviert oder sind die Credentials
-  unvollständig, beendet sich das Skript ohne Fehler.
+  unvollständig, beendet sich das CLI ohne Fehler.
+- Für Entwicklung existiert auch `bindev/backup-nextcloud.sh` als Wrapper.
 
 #### 3. Manuelles Backup auslösen
 
 ```sh
-# Via Skript (nutzt die Admin-UI-Einstellungen):
-bindev/backup-nextcloud.sh
+# Nextcloud-Backup manuell starten (nutzt die Admin-UI-Einstellungen):
+cd /home/peter/dev/mynotes && docker compose exec -T backend python -m app.backup_cli
 
 # Oder nur ein lokales ZIP herunterladen (Admin-API):
 curl -H "Authorization: Bearer <TOKEN>" https://api.mynotes.localhost/admin/backup -o backup.zip
