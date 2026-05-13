@@ -385,7 +385,10 @@ export function NoteEditor() {
   /** Exportiert die aktuelle Excalidraw-Szene als PNG-base64, oder null wenn leer. */
   async function exportCanvasToB64(): Promise<{ image_b64: string; mime: string } | null> {
     const scene = excaliRef.current;
-    const elements = scene?.elements ?? [];
+    // Gelöschte Elemente herausfiltern – Excalidraw behält sie mit
+    // isDeleted:true im Array; ohne Filter sieht das Vision-Modell
+    // bereits gelöschte Striche im exportierten Bild.
+    const elements = (scene?.elements ?? []).filter((e: any) => !e.isDeleted);
     if (!elements.length) return null;
     const { exportToBlob } = await import("@excalidraw/excalidraw");
     const blob = await exportToBlob({
