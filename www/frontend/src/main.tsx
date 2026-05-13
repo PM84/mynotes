@@ -16,6 +16,15 @@ console.info(
 
 registerSW({
   immediate: true,
+  onRegisteredSW(_url, reg) {
+    if (!reg) return;
+    // Alle 60 Min auf neue SW-Version prüfen
+    setInterval(() => reg.update(), 60 * 60 * 1000);
+    // Beim Zurückwechseln zur App sofort prüfen
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") reg.update();
+    });
+  },
   onNeedRefresh() {
     toast("Neue Version verfügbar", {
       action: { label: "Aktualisieren", onClick: () => location.reload() },
