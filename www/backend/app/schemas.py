@@ -141,6 +141,7 @@ class MemoOut(BaseModel):
     id: uuid.UUID
     note_id: uuid.UUID | None
     note_title: str | None = None
+    note_path: str | None = None
     content: str
     created_at: datetime
 

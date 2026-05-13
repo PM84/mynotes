@@ -11,6 +11,7 @@ type Memo = {
   id: string;
   note_id: string | null;
   note_title: string | null;
+  note_path: string | null;
   content: string;
   created_at: string;
 };
@@ -140,7 +141,7 @@ export function Memos() {
   .meta { color: #666; font-size: 0.9em; margin-bottom: 1.5rem; border-bottom: 1px solid #ccc; padding-bottom: 0.5rem; }
   @media print { body { margin: 0; } }
 </style></head><body>
-<div class="meta">${memo.note_title ? `Notiz: ${memo.note_title}<br>` : ""}Erstellt: ${dateStr}</div>
+<div class="meta">${memo.note_path ? `Notiz: ${memo.note_path}<br>` : ""}Erstellt: ${dateStr}</div>
 <div>${htmlContent}</div>
 </body></html>`);
     printWindow.document.close();

@@ -394,6 +394,23 @@ async def extract_tasks(
 # Aktennotiz / E-Mail
 # ---------------------------------------------------------------------------
 
+async def _note_path(session: AsyncSession, note: Note) -> str:
+    """Baut den vollständigen Pfad einer Notiz auf (Kategorie 1 / Kategorie 2 / Titel)."""
+    parts = [note.title or "(ohne Titel)"]
+    current = note
+    seen: set[bytes] = {current.id}
+    while current.parent_id:
+        if current.parent_id in seen:
+            break
+        seen.add(current.parent_id)
+        parent = await session.get(Note, current.parent_id)
+        if not parent:
+            break
+        parts.insert(0, parent.title or "(ohne Titel)")
+        current = parent
+    return " / ".join(parts)
+
+
 async def _single_note_text(session: AsyncSession, note_id: uuid.UUID) -> str:
     """Textinhalt einer einzelnen Notiz für die Aktennotiz-Generierung."""
     n = await session.get(Note, note_id.bytes)
@@ -456,12 +473,14 @@ async def generate_memo(
     # Notiz-Titel für Antwort laden
     n = await session.get(Note, data.note_id.bytes)
     note_title = n.title if n else None
+    note_path = await _note_path(session, n) if n else None
 
     memo_id = uuid.UUID(bytes=memo.id)
     return {
         "id": str(memo_id),
         "note_id": str(data.note_id),
         "note_title": note_title,
+        "note_path": note_path,
         "content": memo_text,
         "created_at": memo.created_at.isoformat(),
     }
@@ -486,9 +505,10 @@ async def send_memo(
     if not memo:
         raise HTTPException(404, "memo not found")
 
-    # Notiz-Titel für Betreff holen
+    # Notiz-Pfad für Betreff holen
     n = await session.get(Note, memo.note_id) if memo.note_id else None
-    subject = f"Aktennotiz: {n.title}" if n else "Aktennotiz"
+    note_path = await _note_path(session, n) if n else None
+    subject = f"Aktennotiz: {note_path}" if note_path else "Aktennotiz"
 
     body_html = md.markdown(memo.content, extensions=["tables", "fenced_code"])
 
@@ -563,12 +583,14 @@ async def list_memos(
 
     result: list[MemoOut] = []
     for m in rows:
-        # Notiz-Titel laden
+        # Notiz-Titel und Pfad laden
         note_title = None
+        note_path = None
         if m.note_id:
             n = await session.get(Note, m.note_id)
             if n:
                 note_title = n.title
+                note_path = await _note_path(session, n)
 
         # Suchfilter (case-insensitive auf content + note_title)
         if q:
@@ -580,6 +602,7 @@ async def list_memos(
             id=uuid.UUID(bytes=m.id),
             note_id=uuid.UUID(bytes=m.note_id) if m.note_id else None,
             note_title=note_title,
+            note_path=note_path,
             content=m.content,
             created_at=m.created_at,
         ))
