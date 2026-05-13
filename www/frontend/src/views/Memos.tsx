@@ -7,6 +7,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { renderToStaticMarkup } from "react-dom/server";
 
+/** Strip wrapping ```markdown ... ``` code fences the AI sometimes adds. */
+function stripCodeFence(text: string): string {
+  const m = text.match(/^```\w*\s*\n?([\s\S]*?)\n?```\s*$/);
+  return m ? m[1] : text;
+}
+
 type Memo = {
   id: string;
   note_id: string | null;
@@ -125,7 +131,7 @@ export function Memos() {
       year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
     });
     const htmlContent = renderToStaticMarkup(
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{memo.content}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripCodeFence(memo.content)}</ReactMarkdown>
     );
     printWindow.document.write(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Aktennotiz</title>
@@ -248,7 +254,7 @@ export function Memos() {
                         className={`text-sm text-slate-700 cursor-pointer prose prose-sm max-w-none ${!isExpanded && m.content.length > 200 ? "max-h-24 overflow-hidden" : ""}`}
                         onClick={() => setExpandedId(isExpanded ? null : m.id)}
                       >
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripCodeFence(m.content)}</ReactMarkdown>
                       </div>
                       {m.content.length > 200 && (
                         <button
