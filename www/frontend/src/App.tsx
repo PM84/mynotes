@@ -12,6 +12,7 @@ import { onSyncChange, pendingCount, pullAll, trySync } from "./sync";
 import { connectRealtime, disconnectRealtime } from "./realtime";
 import { hydrateSearchIndex } from "./searchIndex";
 import { refreshAuth } from "./api";
+import { ensureDbUser } from "./db";
 import { CloudOff, Cloud, Settings, Sparkles, FileText, LogOut, KanbanSquare } from "lucide-react";
 
 export function App() {
@@ -33,6 +34,13 @@ export function App() {
     // Einmalig Token auffrischen (Session verlängern).
     void refreshAuth();
 
+    const init = async () => {
+      const a = useAuth.getState().auth;
+      if (a?.userId) await ensureDbUser(a.userId);
+      await pullAll();
+      await hydrateSearchIndex();
+    };
+
     const upd = async () => setPending(await pendingCount());
     const off = onSyncChange(upd);
     void upd();
@@ -50,8 +58,7 @@ export function App() {
     window.addEventListener("offline", onOffline);
     document.addEventListener("visibilitychange", onVisible);
 
-    void pullAll();
-    void hydrateSearchIndex();
+    void init();
     connectRealtime();
 
     return () => {
@@ -79,7 +86,7 @@ export function App() {
           <NavLink to="/" icon={<FileText size={16} />} label="Notizen" />
           <NavLink to="/tasks" icon={<KanbanSquare size={16} />} label="Aufgaben" />
           <NavLink to="/ai" icon={<Sparkles size={16} />} label="KI-Suche" />
-          <NavLink to="/admin" icon={<Settings size={16} />} label="Admin" />
+          {auth.role === "admin" && <NavLink to="/admin" icon={<Settings size={16} />} label="Admin" />}
         </div>
         <div className="flex items-center gap-2 sm:gap-3 text-sm min-w-0">
           {online ? <Cloud size={16} className="text-emerald-400 shrink-0" /> : <CloudOff size={16} className="text-amber-400 shrink-0" />}
@@ -97,7 +104,7 @@ export function App() {
           <Route path="/notes/:id" element={<NoteEditor />} />
           <Route path="/assets/:id" element={<AssetViewer />} />
           <Route path="/ai" element={<AISearch />} />
-          <Route path="/admin" element={<Admin />} />
+          <Route path="/admin" element={auth.role === "admin" ? <Admin /> : <Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

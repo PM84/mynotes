@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..app_settings import get_setting, set_setting
 from ..db import get_session
 from ..deps import get_current_user, get_default_workspace
 from ..models import Task, User
@@ -14,6 +16,13 @@ from ..schemas import TaskIn, TaskOut
 from .ws import broadcast_user
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+DEFAULT_COLUMNS: list[dict[str, Any]] = [
+    {"id": "backlog", "title": "Backlog", "color": "bg-slate-100"},
+    {"id": "todo", "title": "To Do", "color": "bg-blue-50"},
+    {"id": "doing", "title": "In Arbeit", "color": "bg-amber-50"},
+    {"id": "done", "title": "Erledigt", "color": "bg-emerald-50", "done": True},
+]
 
 
 def to_out(t: Task) -> TaskOut:
@@ -26,6 +35,8 @@ def to_out(t: Task) -> TaskOut:
         priority=t.priority,
         position=t.position,
         due_date=t.due_date,
+        tags=t.tags,
+        closed_at=t.closed_at,
         created_at=t.created_at,
         updated_at=t.updated_at,
         deleted_at=t.deleted_at,
@@ -102,6 +113,10 @@ async def upsert_task(
     t.position = data.position
     if data.due_date is not None:
         t.due_date = data.due_date
+    if data.tags is not None:
+        t.tags = data.tags
+    if data.closed_at is not None:
+        t.closed_at = data.closed_at
     await session.commit()
     await session.refresh(t)
     out = to_out(t)
@@ -126,3 +141,30 @@ async def delete_task(
     await session.commit()
     await broadcast_user(user.id, {"type": "task.delete", "id": str(task_id)})
     return {"ok": True}
+
+
+# ---------- Kanban-Spalten ----------
+
+@router.get("/columns")
+async def get_columns(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    cols = await get_setting(session, "kanban_columns", DEFAULT_COLUMNS)
+    if not isinstance(cols, list):
+        return DEFAULT_COLUMNS
+    return cols
+
+
+@router.put("/columns")
+async def set_columns(
+    payload: list[dict[str, Any]],
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    # Validate structure
+    for col in payload:
+        if not col.get("id") or not col.get("title"):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "each column needs id and title")
+    await set_setting(session, "kanban_columns", payload)
+    return payload

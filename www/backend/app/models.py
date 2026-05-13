@@ -148,10 +148,12 @@ class Task(Base):
     note_id: Mapped[bytes | None] = mapped_column(BINARY(16), ForeignKey("notes.id", ondelete="SET NULL"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(500), default="")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(30), default="backlog")  # backlog|todo|doing|done
+    status: Mapped[str] = mapped_column(String(50), default="backlog")
     priority: Mapped[int] = mapped_column(Integer, default=0)
     position: Mapped[int] = mapped_column(Integer, default=0)
     due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    tags: Mapped[Any | None] = mapped_column(JSON, nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

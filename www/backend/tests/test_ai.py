@@ -314,3 +314,116 @@ async def test_extract_tasks_marks_removed_as_dnf(client: AsyncClient, auth_head
     old = [t for t in tasks if t["id"] == task_id]
     assert len(old) == 1
     assert old[0]["title"].startswith("DNF: ")
+
+
+# ---------------------------------------------------------------------------
+# Aktennotiz / E-Mail
+# ---------------------------------------------------------------------------
+
+
+async def test_memo_generate(client: AsyncClient, auth_headers: dict):
+    """Aktennotiz wird aus Notizinhalt generiert."""
+    await _create_provider(client, auth_headers)
+    nid = await _create_note(client, auth_headers, "Besprechung", "Ergebnis: alles gut.")
+    StubAdapter.chat_response = "**Betreff:** Besprechung\n\nSachverhalt: alles gut."
+    r = await client.post(
+        "/ai/memo", json={"note_id": nid}, headers=auth_headers
+    )
+    assert r.status_code == 200, r.text
+    assert "Besprechung" in r.json()["memo"]
+    assert "Sachverhalt" in StubAdapter.last_chat_messages[0].content
+
+
+async def test_memo_generate_404_for_missing(client: AsyncClient, auth_headers: dict):
+    await _create_provider(client, auth_headers)
+    r = await client.post(
+        "/ai/memo",
+        json={"note_id": str(uuid.uuid4())},
+        headers=auth_headers,
+    )
+    assert r.status_code == 404
+
+
+async def test_memo_send_validates_email(client: AsyncClient, auth_headers: dict):
+    """Ungültige E-Mail-Adresse wird abgelehnt."""
+    await _create_provider(client, auth_headers)
+    nid = await _create_note(client, auth_headers, "Test", "Inhalt")
+    r = await client.post(
+        "/ai/memo/send",
+        json={"note_id": nid, "recipient": "ungültig", "memo_text": "Text"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 400
+
+
+async def test_memo_send_503_when_smtp_not_configured(client: AsyncClient, auth_headers: dict):
+    """Ohne SMTP-Konfiguration gibt es 503."""
+    await _create_provider(client, auth_headers)
+    nid = await _create_note(client, auth_headers, "Test", "Inhalt")
+    r = await client.post(
+        "/ai/memo/send",
+        json={"note_id": nid, "recipient": "test@example.com", "memo_text": "Aktennotiz-Text"},
+        headers=auth_headers,
+    )
+    # SMTP_HOST ist leer → RuntimeError → 503
+    assert r.status_code == 503
+
+
+async def test_memo_send_saves_recent_address(client: AsyncClient, auth_headers: dict, monkeypatch):
+    """Nach erfolgreichem Versand wird die Adresse in der Recent-Liste gespeichert."""
+    import app.email as email_mod
+
+    async def _fake_send(session, to, subject, body_text):
+        pass  # kein echter SMTP
+
+    monkeypatch.setattr(email_mod, "send_email", _fake_send)
+
+    await _create_provider(client, auth_headers)
+    nid = await _create_note(client, auth_headers, "Notiz", "Inhalt")
+    r = await client.post(
+        "/ai/memo/send",
+        json={"note_id": nid, "recipient": "alice@example.com", "memo_text": "Memo"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+
+    # Adresse taucht in der Recent-Liste auf
+    r = await client.get("/ai/memo/addresses", headers=auth_headers)
+    assert r.status_code == 200
+    assert "alice@example.com" in r.json()["addresses"]
+
+
+async def test_memo_addresses_max_three(client: AsyncClient, auth_headers: dict, monkeypatch):
+    """Maximal 3 Adressen werden gespeichert, neueste zuerst."""
+    import app.email as email_mod
+
+    async def _fake_send(session, to, subject, body_text):
+        pass
+
+    monkeypatch.setattr(email_mod, "send_email", _fake_send)
+
+    await _create_provider(client, auth_headers)
+    nid = await _create_note(client, auth_headers, "N", "I")
+
+    for addr in ["a@x.com", "b@x.com", "c@x.com", "d@x.com"]:
+        r = await client.post(
+            "/ai/memo/send",
+            json={"note_id": nid, "recipient": addr, "memo_text": "M"},
+            headers=auth_headers,
+        )
+        assert r.status_code == 200, r.text
+
+    r = await client.get("/ai/memo/addresses", headers=auth_headers)
+    addrs = r.json()["addresses"]
+    assert len(addrs) == 3
+    # Neueste zuerst
+    assert addrs[0] == "d@x.com"
+    assert "a@x.com" not in addrs
+
+
+async def test_memo_addresses_empty_initially(client: AsyncClient, auth_headers: dict):
+    """Ohne vorherige Nutzung ist die Recent-Liste leer."""
+    r = await client.get("/ai/memo/addresses", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["addresses"] == []

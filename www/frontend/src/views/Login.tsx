@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../auth";
+import { useAuth, parseJwtPayload } from "../auth";
 import { apiJson } from "../api";
 import { toast } from "sonner";
 
@@ -18,7 +18,14 @@ export function Login() {
       const tok = await apiJson<{ access_token: string; refresh_token: string }>(
         "/auth/login", "POST", { email, password }
       );
-      setAuth({ access: tok.access_token, refresh: tok.refresh_token, email });
+      const claims = parseJwtPayload(tok.access_token);
+      setAuth({
+        access: tok.access_token,
+        refresh: tok.refresh_token,
+        email,
+        role: (claims.role as string) || "user",
+        userId: (claims.sub as string) || "",
+      });
       nav("/");
     } catch (e: any) {
       toast.error("Login fehlgeschlagen: " + (e.message || ""));

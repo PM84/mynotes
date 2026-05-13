@@ -24,6 +24,8 @@ export type ServerTask = {
   priority: number;
   position: number;
   due_date: string | null;
+  tags: string[] | null;
+  closed_at: string | null;
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;
@@ -158,6 +160,8 @@ export async function upsertTaskLocal(input: Partial<LocalTask> & { id?: string 
     priority: input.priority ?? existing?.priority ?? 0,
     position: input.position ?? existing?.position ?? 0,
     due_date: input.due_date !== undefined ? input.due_date : (existing?.due_date ?? null),
+    tags: input.tags !== undefined ? input.tags : (existing?.tags ?? null),
+    closed_at: input.closed_at !== undefined ? input.closed_at : (existing?.closed_at ?? null),
     updated_at: now(),
     dirty: 1,
     deleted: 0,
@@ -177,6 +181,8 @@ export async function upsertTaskLocal(input: Partial<LocalTask> & { id?: string 
         priority: next.priority,
         position: next.position,
         due_date: next.due_date,
+        tags: next.tags,
+        closed_at: next.closed_at,
         client_updated_at: baseUpdatedAt,
       },
     },
@@ -655,6 +661,8 @@ async function pullTasks() {
             priority: r.priority,
             position: r.position,
             due_date: r.due_date,
+            tags: r.tags ?? null,
+            closed_at: r.closed_at ?? null,
             updated_at: r.updated_at,
             dirty: 0,
             deleted: 0,

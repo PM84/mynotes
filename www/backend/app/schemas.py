@@ -35,6 +35,18 @@ class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class UserCreateIn(BaseModel):
+    email: Email
+    password: str = Field(min_length=6)
+    role: str = "user"
+
+
+class UserUpdateIn(BaseModel):
+    email: Email | None = None
+    password: str | None = Field(default=None, min_length=6)
+    role: str | None = None
+
+
 class NoteIn(BaseModel):
     id: uuid.UUID | None = None  # vom Client vergebbar (Offline-Queue)
     parent_id: uuid.UUID | None = None
@@ -108,6 +120,20 @@ class AIExtractTasksIn(BaseModel):
     mime: str | None = None
 
 
+class AIMemoIn(BaseModel):
+    note_id: uuid.UUID
+    image_b64: str | None = None
+    mime: str | None = None
+
+
+class AIMemoSendIn(BaseModel):
+    note_id: uuid.UUID
+    recipient: str  # E-Mail-Adresse
+    memo_text: str  # Vom Frontend übernommener (ggf. editierter) Text
+    image_b64: str | None = None
+    mime: str | None = None
+
+
 class ProviderIn(BaseModel):
     name: str
     adapter: str
@@ -147,6 +173,8 @@ class TaskIn(BaseModel):
     priority: int = 0
     position: int = 0
     due_date: datetime | None = None
+    tags: list[str] | None = None
+    closed_at: datetime | None = None
     client_updated_at: datetime | None = None
 
 
@@ -159,6 +187,8 @@ class TaskOut(BaseModel):
     priority: int
     position: int
     due_date: datetime | None
+    tags: list[str] | None = None
+    closed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None

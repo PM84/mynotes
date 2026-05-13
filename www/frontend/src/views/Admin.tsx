@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { api, apiJson, apiBlob, API_BASE } from "../api";
 import { useAuth } from "../auth";
 import { toast } from "sonner";
+import { Pencil, Trash2 } from "lucide-react";
+
+type UserRow = { id: string; email: string; role: string };
 
 type Provider = {
   id: number; name: string; adapter: string; base_url: string; has_key: boolean;
@@ -54,11 +57,17 @@ export function Admin() {
   const [promptContent, setPromptContent] = useState("");
   const [sessionMinutes, setSessionMinutes] = useState<number>(40320);
   const [sessionMinutesInput, setSessionMinutesInput] = useState<string>("40320");
+  const [autoCloseDays, setAutoCloseDays] = useState<number>(30);
+  const [autoCloseDaysInput, setAutoCloseDaysInput] = useState<string>("30");
   const [backendVersion, setBackendVersion] = useState<string>("…");
+  const [smtp, setSmtp] = useState({ host: "", port: "587", user: "", password: "", from: "", use_tls: true });
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [editingUser, setEditingUser] = useState<{ id?: string; email: string; password: string; role: string } | null>(null);
 
   async function reload() {
     setProviders(await api<Provider[]>("/admin/ai/providers"));
     setPrompts(await api<string[]>("/admin/ai/prompts"));
+    try { setUsers(await api<UserRow[]>("/admin/users")); } catch { /* ok */ }
     try {
       const h = await api<{ version: string }>("/healthz");
       setBackendVersion(h.version);
@@ -66,9 +75,12 @@ export function Admin() {
       setBackendVersion("?");
     }
     try {
-      const s = await api<{ session_lifetime_minutes: number }>("/admin/settings");
+      const s = await api<{ session_lifetime_minutes: number; auto_close_days: number; smtp_host: string; smtp_port: number; smtp_user: string; smtp_password: string; smtp_from: string; smtp_use_tls: boolean }>("/admin/settings");
       setSessionMinutes(s.session_lifetime_minutes);
       setSessionMinutesInput(String(s.session_lifetime_minutes));
+      setAutoCloseDays(s.auto_close_days);
+      setAutoCloseDaysInput(String(s.auto_close_days));
+      setSmtp({ host: s.smtp_host || "", port: String(s.smtp_port || 587), user: s.smtp_user || "", password: s.smtp_password || "", from: s.smtp_from || "", use_tls: s.smtp_use_tls ?? true });
     } catch {
       // optional
     }
@@ -172,6 +184,78 @@ export function Admin() {
     }
   }
 
+  async function saveAutoCloseDays() {
+    const d = parseInt(autoCloseDaysInput, 10);
+    if (!Number.isFinite(d)) {
+      toast.error("Bitte ganze Zahl in Tagen eingeben.");
+      return;
+    }
+    try {
+      const r = await apiJson<{ auto_close_days: number }>(
+        "/admin/settings",
+        "PUT",
+        { auto_close_days: d }
+      );
+      setAutoCloseDays(r.auto_close_days);
+      setAutoCloseDaysInput(String(r.auto_close_days));
+      toast.success("Auto-Close gespeichert.");
+    } catch (e: any) {
+      toast.error("Fehler: " + e.message);
+    }
+  }
+
+  async function saveSmtp() {
+    try {
+      await apiJson("/admin/settings", "PUT", {
+        smtp_host: smtp.host,
+        smtp_port: parseInt(smtp.port, 10) || 587,
+        smtp_user: smtp.user,
+        smtp_password: smtp.password,
+        smtp_from: smtp.from,
+        smtp_use_tls: smtp.use_tls,
+      });
+      toast.success("SMTP-Einstellungen gespeichert.");
+    } catch (e: any) {
+      toast.error("Fehler: " + e.message);
+    }
+  }
+
+  async function saveUser() {
+    if (!editingUser) return;
+    try {
+      if (editingUser.id) {
+        const body: Record<string, string> = {};
+        if (editingUser.email) body.email = editingUser.email;
+        if (editingUser.password) body.password = editingUser.password;
+        if (editingUser.role) body.role = editingUser.role;
+        await apiJson(`/admin/users/${editingUser.id}`, "PUT", body);
+        toast.success("Benutzer aktualisiert");
+      } else {
+        await apiJson("/admin/users", "POST", {
+          email: editingUser.email,
+          password: editingUser.password,
+          role: editingUser.role,
+        });
+        toast.success("Benutzer erstellt");
+      }
+      setEditingUser(null);
+      await reload();
+    } catch (e: any) {
+      toast.error("Fehler: " + e.message);
+    }
+  }
+
+  async function deleteUser(u: UserRow) {
+    if (!confirm(`Benutzer „${u.email}" wirklich löschen? Alle Daten (Notizen, Aufgaben, Assets) werden unwiderruflich gelöscht.`)) return;
+    try {
+      await apiJson(`/admin/users/${u.id}`, "DELETE");
+      toast.success("Benutzer gelöscht");
+      await reload();
+    } catch (e: any) {
+      toast.error("Fehler: " + e.message);
+    }
+  }
+
   function fmtDuration(min: number): string {
     if (min >= 1440) {
       const d = min / 1440;
@@ -233,6 +317,57 @@ export function Admin() {
 
   return (
     <div className="p-4 max-w-5xl mx-auto space-y-8">
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-bold">Benutzer</h2>
+          <button
+            onClick={() => setEditingUser({ email: "", password: "", role: "user" })}
+            className="bg-slate-900 text-white px-3 py-1 rounded"
+          >
+            + Neu
+          </button>
+        </div>
+        <table className="w-full text-sm bg-white shadow-sm rounded overflow-hidden">
+          <thead className="bg-slate-100 text-left">
+            <tr><th className="p-2">E-Mail</th><th>Rolle</th><th className="text-right pr-2">Aktionen</th></tr>
+          </thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id} className="border-t">
+                <td className="p-2">{u.email}</td>
+                <td>
+                  <span className={`px-1.5 py-0.5 rounded text-xs ${u.role === "admin" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700"}`}>
+                    {u.role}
+                  </span>
+                </td>
+                <td className="text-right pr-2 space-x-2">
+                  <button onClick={() => setEditingUser({ id: u.id, email: u.email, password: "", role: u.role })} className="inline-flex items-center text-xs underline" title="Bearbeiten"><Pencil size={14} /></button>
+                  <button onClick={() => deleteUser(u)} className="inline-flex items-center text-xs underline text-red-600" title="Löschen"><Trash2 size={14} /></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {editingUser && (
+          <div className="mt-4 bg-white p-4 rounded shadow space-y-2">
+            <h3 className="font-semibold">{editingUser.id ? "Benutzer bearbeiten" : "Neuer Benutzer"}</h3>
+            <div className="grid grid-cols-2 gap-2 max-w-lg">
+              <input className="border rounded px-2 py-1 col-span-2" placeholder="E-Mail" type="email" value={editingUser.email} onChange={(e) => setEditingUser({ ...editingUser, email: e.target.value })} />
+              <input className="border rounded px-2 py-1" placeholder={editingUser.id ? "Neues Passwort (leer = unverändert)" : "Passwort"} type="password" value={editingUser.password} onChange={(e) => setEditingUser({ ...editingUser, password: e.target.value })} />
+              <select className="border rounded px-2 py-1" value={editingUser.role} onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value })}>
+                <option value="user">user</option>
+                <option value="admin">admin</option>
+              </select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setEditingUser(null)} className="px-3 py-1 border rounded">Abbrechen</button>
+              <button onClick={saveUser} className="px-3 py-1 bg-slate-900 text-white rounded">Speichern</button>
+            </div>
+          </div>
+        )}
+      </section>
+
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-bold">KI-Provider</h2>
@@ -417,6 +552,55 @@ export function Admin() {
             aktuell aktiv: {sessionMinutes} Min. ({fmtDuration(sessionMinutes)})
           </span>
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold mb-3">Auto-Close (Kanban)</h2>
+        <p className="text-sm text-slate-600 mb-3">
+          Aufgaben in „Erledigt"-Spalten werden nach dieser Anzahl Tagen automatisch
+          geschlossen und aus der Standard-Ansicht ausgeblendet. Wert <strong>0</strong>{" "}
+          deaktiviert das Auto-Close. Erlaubt: 0 – 3650 Tage.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="number"
+            min={0}
+            max={3650}
+            step={1}
+            className="border rounded px-2 py-1 w-32"
+            value={autoCloseDaysInput}
+            onChange={(e) => setAutoCloseDaysInput(e.target.value)}
+          />
+          <span className="text-sm text-slate-500">Tage</span>
+          <button
+            onClick={saveAutoCloseDays}
+            className="px-3 py-1 bg-slate-900 text-white rounded"
+          >
+            Speichern
+          </button>
+          <span className="text-xs text-slate-400">
+            aktuell: {autoCloseDays} Tage
+          </span>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold mb-3">E-Mail (SMTP)</h2>
+        <p className="text-sm text-slate-600 mb-3">
+          SMTP-Einstellungen für den Versand von Aktennotizen per E-Mail. Alle Felder
+          leer lassen, um den E-Mail-Versand zu deaktivieren.
+        </p>
+        <div className="grid grid-cols-2 gap-2 max-w-lg">
+          <input className="border rounded px-2 py-1 col-span-2" placeholder="SMTP-Host" value={smtp.host} onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} />
+          <input className="border rounded px-2 py-1" placeholder="Port" type="number" value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: e.target.value })} />
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={smtp.use_tls} onChange={(e) => setSmtp({ ...smtp, use_tls: e.target.checked })} /> STARTTLS
+          </label>
+          <input className="border rounded px-2 py-1 col-span-2" placeholder="Benutzer" value={smtp.user} onChange={(e) => setSmtp({ ...smtp, user: e.target.value })} />
+          <input className="border rounded px-2 py-1 col-span-2" placeholder="Passwort" type="password" value={smtp.password} onChange={(e) => setSmtp({ ...smtp, password: e.target.value })} />
+          <input className="border rounded px-2 py-1 col-span-2" placeholder="Absender-Adresse (From)" value={smtp.from} onChange={(e) => setSmtp({ ...smtp, from: e.target.value })} />
+        </div>
+        <button onClick={saveSmtp} className="mt-3 px-3 py-1 bg-slate-900 text-white rounded">Speichern</button>
       </section>
 
       <section>

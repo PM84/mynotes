@@ -23,17 +23,17 @@ export type LocalAsset = {
   serverSha?: string;
 };
 
-export type TaskStatus = "backlog" | "todo" | "doing" | "done";
-
 export type LocalTask = {
   id: string;
   note_id: string | null;
   title: string;
   description: string | null;
-  status: TaskStatus;
+  status: string;
   priority: number;
   position: number;
   due_date: string | null; // ISO
+  tags: string[] | null;
+  closed_at: string | null; // ISO
   updated_at: string; // ISO
   dirty?: 0 | 1;
   deleted?: 0 | 1;
@@ -69,3 +69,20 @@ class MyNotesDB extends Dexie {
 }
 
 export const db = new MyNotesDB();
+
+const DB_USER_KEY = "mynotes.db_user";
+
+/**
+ * Ensures the IndexedDB belongs to the given user. If a different user was
+ * previously logged in, clears all tables so data doesn't leak across accounts.
+ */
+export async function ensureDbUser(userId: string): Promise<void> {
+  const prev = localStorage.getItem(DB_USER_KEY);
+  if (prev === userId) return;
+  // Different user (or first login) → wipe local data
+  await db.notes.clear();
+  await db.assets.clear();
+  await db.pending.clear();
+  await db.tasks.clear();
+  localStorage.setItem(DB_USER_KEY, userId);
+}

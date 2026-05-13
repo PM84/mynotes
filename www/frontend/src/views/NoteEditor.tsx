@@ -7,7 +7,7 @@ import { v4 as uuid } from "uuid";
 import { sendLive, subscribeLive } from "../realtime";
 import { apiJson } from "../api";
 import { toast } from "sonner";
-import { ArrowLeft, CheckSquare, Columns, FileText, FolderInput, Image as ImageIcon, ListChecks, Loader2, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, Sparkles, Tag, X } from "lucide-react";
+import { ArrowLeft, CheckSquare, Columns, FileText, FolderInput, Image as ImageIcon, ListChecks, Loader2, Mail, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, Send, Sparkles, Tag, X } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = lazy(() =>
@@ -234,6 +234,13 @@ export function NoteEditor() {
   const [moveSearch, setMoveSearch] = useState("");
   const allNotes = useLiveQuery(() => db.notes.toArray(), []);
 
+  // --- E-Mail-Dialog ---
+  const [showEmail, setShowEmail] = useState(false);
+  const [memoText, setMemoText] = useState("");
+  const [emailRecipient, setEmailRecipient] = useState("");
+  const [recentEmails, setRecentEmails] = useState<string[]>([]);
+  const [emailSending, setEmailSending] = useState(false);
+
   /** IDs aller Nachkommen ermitteln (um Zyklen zu verhindern). */
   function getDescendantIds(noteId: string, notes: typeof allNotes): Set<string> {
     const desc = new Set<string>();
@@ -415,6 +422,49 @@ export function NoteEditor() {
     }
   }
 
+  async function generateMemo() {
+    if (!id || !navigator.onLine) return;
+    setBusy("memo");
+    try {
+      await save();
+      const canvasPayload = await exportCanvasToB64();
+      const r = await apiJson<{ memo: string }>("/ai/memo", "POST", {
+        note_id: id,
+        ...(canvasPayload ?? {}),
+      });
+      setMemoText(r.memo);
+      // Letzte Adressen laden
+      try {
+        const a = await apiJson<{ addresses: string[] }>("/ai/memo/addresses", "GET");
+        setRecentEmails(a.addresses);
+      } catch { setRecentEmails([]); }
+      setEmailRecipient("");
+      setShowEmail(true);
+    } catch (e: any) {
+      toast.error("Aktennotiz-Generierung fehlgeschlagen: " + e.message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function sendMemoEmail() {
+    if (!id || !emailRecipient.trim()) return;
+    setEmailSending(true);
+    try {
+      await apiJson("/ai/memo/send", "POST", {
+        note_id: id,
+        recipient: emailRecipient.trim(),
+        memo_text: memoText,
+      });
+      toast.success("E-Mail gesendet");
+      setShowEmail(false);
+    } catch (e: any) {
+      toast.error("E-Mail-Versand fehlgeschlagen: " + e.message);
+    } finally {
+      setEmailSending(false);
+    }
+  }
+
   if (!note) {
     return <div className="p-4 text-slate-500">Notiz wird geladen…</div>;
   }
@@ -501,6 +551,14 @@ export function NoteEditor() {
           title="Aufgaben per KI aus Notiz extrahieren"
         >
           {busy === "extract" ? <Loader2 size={18} className="animate-spin" /> : <ListChecks size={18} />}
+        </button>
+        <button
+          onClick={generateMemo}
+          disabled={busy !== null || !navigator.onLine}
+          className="p-1 hover:bg-slate-100 rounded disabled:opacity-30"
+          title="Aktennotiz per E-Mail senden"
+        >
+          {busy === "memo" ? <Loader2 size={18} className="animate-spin" /> : <Mail size={18} />}
         </button>
         <div className="flex items-center border rounded" role="group" aria-label="Ansicht">
           <button
@@ -675,6 +733,72 @@ export function NoteEditor() {
                 <li className="text-sm text-slate-400 text-center py-4">Keine passenden Notizen</li>
               )}
             </ul>
+          </div>
+        </div>
+      )}
+
+      {/* E-Mail-Dialog */}
+      {showEmail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowEmail(false)}>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-lg font-semibold">Aktennotiz per E-Mail senden</h2>
+              <button onClick={() => setShowEmail(false)} className="p-1 hover:bg-slate-100 rounded">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-4 space-y-3 overflow-y-auto flex-1">
+              <div>
+                <label className="block text-sm font-medium mb-1">Empfänger</label>
+                <input
+                  autoFocus
+                  type="email"
+                  className="w-full px-3 py-2 border rounded text-sm"
+                  placeholder="email@example.com"
+                  value={emailRecipient}
+                  onChange={(e) => setEmailRecipient(e.target.value)}
+                />
+                {recentEmails.length > 0 && (
+                  <div className="flex gap-1 mt-1 flex-wrap">
+                    {recentEmails.map((addr) => (
+                      <button
+                        key={addr}
+                        onClick={() => setEmailRecipient(addr)}
+                        className={`text-xs px-2 py-0.5 rounded border hover:bg-slate-100 ${
+                          emailRecipient === addr ? "bg-slate-200 border-slate-400" : ""
+                        }`}
+                      >
+                        {addr}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Aktennotiz (Vorschau)</label>
+                <textarea
+                  className="w-full px-3 py-2 border rounded text-sm font-mono h-48"
+                  value={memoText}
+                  onChange={(e) => setMemoText(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 p-4 border-t">
+              <button
+                onClick={() => setShowEmail(false)}
+                className="px-4 py-2 text-sm border rounded hover:bg-slate-100"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={sendMemoEmail}
+                disabled={emailSending || !emailRecipient.trim()}
+                className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              >
+                {emailSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                Senden
+              </button>
+            </div>
           </div>
         </div>
       )}

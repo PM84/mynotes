@@ -1,10 +1,11 @@
-"""Background-Worker: Embedding + Vision-OCR aus pending_jobs."""
+"""Background-Worker: Embedding + Vision-OCR aus pending_jobs + Auto-Close."""
 from __future__ import annotations
 
 import asyncio
 import base64
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import select, update
@@ -12,9 +13,10 @@ from sqlalchemy import select, update
 from .ai.embedding import reembed_note
 from .ai.prompt_loader import load
 from .ai.registry import get_active
+from .app_settings import get_setting
 from .config import get_settings
 from .db import SessionLocal
-from .models import Asset, Note, NoteAsset, PendingJob
+from .models import Asset, Note, NoteAsset, PendingJob, Task
 
 log = logging.getLogger("worker")
 
@@ -66,11 +68,55 @@ HANDLERS = {
     "vision_ocr": _process_vision_ocr,
 }
 
+_last_auto_close = datetime.min
+
+
+async def _auto_close_tasks() -> None:
+    """Close tasks in 'done' columns older than auto_close_days."""
+    global _last_auto_close
+    now = datetime.now(timezone.utc)
+    # Run at most once per hour
+    if (now - _last_auto_close).total_seconds() < 3600:
+        return
+    _last_auto_close = now
+    try:
+        from .api.tasks import DEFAULT_COLUMNS
+
+        async with SessionLocal() as s:
+            days = await get_setting(s, "auto_close_days", 30)
+            try:
+                days = int(days)
+            except (TypeError, ValueError):
+                days = 30
+            if days <= 0:
+                return
+            cols = await get_setting(s, "kanban_columns", DEFAULT_COLUMNS)
+            if not isinstance(cols, list):
+                cols = DEFAULT_COLUMNS
+            done_ids = [c["id"] for c in cols if c.get("done")]
+            if not done_ids:
+                return
+            cutoff = now - timedelta(days=days)
+            result = await s.execute(
+                update(Task)
+                .where(Task.status.in_(done_ids))
+                .where(Task.closed_at.is_(None))
+                .where(Task.deleted_at.is_(None))
+                .where(Task.updated_at < cutoff)
+                .values(closed_at=now)
+            )
+            if result.rowcount:
+                log.info("auto-closed %d tasks", result.rowcount)
+            await s.commit()
+    except Exception as e:
+        log.warning("auto_close_tasks error: %s", e)
+
 
 async def loop() -> None:
     """Sehr einfache Polling-Schleife. Für MVP ausreichend."""
     while True:
         try:
+            await _auto_close_tasks()
             async with SessionLocal() as s:
                 job = (
                     await s.execute(

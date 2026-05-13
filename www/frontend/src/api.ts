@@ -1,4 +1,4 @@
-import { useAuth } from "./auth";
+import { useAuth, parseJwtPayload } from "./auth";
 
 export const API_BASE = (import.meta.env.VITE_API_BASE as string) || "";
 
@@ -65,10 +65,13 @@ export async function refreshAuth(): Promise<boolean> {
       return false;
     }
     const tok = (await res.json()) as { access_token: string; refresh_token: string };
+    const claims = parseJwtPayload(tok.access_token);
     useAuth.getState().setAuth({
       access: tok.access_token,
       refresh: tok.refresh_token,
       email: auth.email,
+      role: (claims.role as string) || "user",
+      userId: (claims.sub as string) || "",
     });
     return true;
   } catch {

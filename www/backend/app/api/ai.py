@@ -15,7 +15,10 @@ from ..ai.registry import get_active
 from ..db import get_session
 from ..deps import get_current_user
 from ..models import Note, User
-from ..schemas import AIContradictionsIn, AIRagIn, AIRagOut, AISummarizeIn, AICanvasIn, AIExtractTasksIn
+from ..schemas import (
+    AIContradictionsIn, AIRagIn, AIRagOut, AISummarizeIn,
+    AICanvasIn, AIExtractTasksIn, AIMemoIn, AIMemoSendIn,
+)
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -384,3 +387,124 @@ async def extract_tasks(
     )
 
     return {"created": created, "updated": updated, "marked_dnf": marked_dnf}
+
+
+# ---------------------------------------------------------------------------
+# Aktennotiz / E-Mail
+# ---------------------------------------------------------------------------
+
+async def _single_note_text(session: AsyncSession, note_id: uuid.UUID) -> str:
+    """Textinhalt einer einzelnen Notiz für die Aktennotiz-Generierung."""
+    n = await session.get(Note, note_id.bytes)
+    if not n:
+        raise HTTPException(404, "note not found")
+    return f"### {n.title}\n{n.body_md or ''}\n{n.ocr_text or ''}"
+
+
+@router.post("/memo")
+async def generate_memo(
+    data: AIMemoIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Generiert eine Aktennotiz (Memo) aus einer Notiz via KI."""
+    text = await _single_note_text(session, data.note_id)
+    prompt = load("memo").format(content=text)
+
+    if data.image_b64 and data.mime:
+        if not data.mime.startswith("image/"):
+            raise HTTPException(400, "mime must be image/*")
+        row, client = await _get_active_or_400(session, "vision")
+        if not row.vision_model:
+            raise HTTPException(400, "no vision_model on active provider")
+        vision_prompt = (
+            prompt
+            + "\n\nZusätzlich liegt ein Bild des Zeichenbereichs der Notiz bei. "
+            "Berücksichtige dessen Inhalt in der Aktennotiz."
+        )
+        try:
+            memo = await client.vision(
+                data.image_b64, data.mime, vision_prompt, model=row.vision_model
+            )
+        except httpx.HTTPStatusError as e:
+            raise _http_to_status(e)
+        return {"memo": memo}
+
+    row, client = await _get_active_or_400(session, "chat")
+    if not row.chat_model:
+        raise HTTPException(400, "no chat_model on active provider")
+    try:
+        resp = await client.chat([Message(role="user", content=prompt)], model=row.chat_model)
+    except httpx.HTTPStatusError as e:
+        raise _http_to_status(e)
+    return {"memo": resp.text}
+
+
+@router.post("/memo/send")
+async def send_memo(
+    data: AIMemoSendIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Sendet eine Aktennotiz per E-Mail und speichert die Empfänger-Adresse."""
+    import re
+    from ..email import send_email
+
+    # Einfache E-Mail-Validierung
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", data.recipient):
+        raise HTTPException(400, "Ungültige E-Mail-Adresse")
+
+    # Notiz-Titel für Betreff holen
+    n = await session.get(Note, data.note_id.bytes)
+    if not n:
+        raise HTTPException(404, "note not found")
+
+    subject = f"Aktennotiz: {n.title}"
+    try:
+        await send_email(session, data.recipient, subject, data.memo_text)
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"E-Mail-Versand fehlgeschlagen: {e}")
+
+    # Empfänger in Recent-Liste speichern
+    await _save_recent_email(session, user, data.recipient)
+
+    return {"ok": True}
+
+
+async def _save_recent_email(session: AsyncSession, user: User, email: str) -> None:
+    """Speichert eine E-Mail-Adresse in der per-user Recent-Liste (max 3, nach letzter
+    Verwendung absteigend sortiert)."""
+    from datetime import datetime, timezone
+    from ..app_settings import get_setting, set_setting
+
+    MAX_RECENT = 3
+    key = f"recent_email_{uuid.UUID(bytes=user.id)}"
+    entries: list[dict] = await get_setting(session, key, [])
+    if not isinstance(entries, list):
+        entries = []
+
+    # Bestehenden Eintrag entfernen (case-insensitive)
+    entries = [e for e in entries if e.get("email", "").lower() != email.lower()]
+    # Vorn einfügen
+    entries.insert(0, {"email": email, "last_used": datetime.now(timezone.utc).isoformat()})
+    # Max 3
+    entries = entries[:MAX_RECENT]
+
+    await set_setting(session, key, entries)
+
+
+@router.get("/memo/addresses")
+async def get_recent_emails(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Gibt die zuletzt verwendeten E-Mail-Adressen zurück (max 3)."""
+    from ..app_settings import get_setting
+
+    key = f"recent_email_{uuid.UUID(bytes=user.id)}"
+    entries: list[dict] = await get_setting(session, key, [])
+    if not isinstance(entries, list):
+        entries = []
+    return {"addresses": [e.get("email", "") for e in entries[:3]]}

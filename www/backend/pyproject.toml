@@ -19,6 +19,7 @@ dependencies = [
     "python-magic>=0.4.27",
     "slowapi>=0.1.9",
     "tiktoken>=0.8",
+    "aiosmtplib>=3.0",
 ]
 
 [project.optional-dependencies]

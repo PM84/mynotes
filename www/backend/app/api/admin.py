@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..ai.registry import build_adapter
@@ -32,13 +32,112 @@ from ..models import (
     NoteAsset,
     NoteChunk,
     PendingJob,
+    Task,
     User,
     Workspace,
 )
-from ..schemas import ProviderIn, ProviderOut
+from ..schemas import ProviderIn, ProviderOut, UserCreateIn, UserOut, UserUpdateIn
+from ..security import hash_password
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
+
+# ---------------------------------------------------------------------------
+# User-Verwaltung
+# ---------------------------------------------------------------------------
+
+def _user_out(u: User) -> UserOut:
+    import uuid as _uuid
+    return UserOut(id=_uuid.UUID(bytes=u.id), email=u.email, role=u.role)
+
+
+@router.get("/users", response_model=list[UserOut])
+async def list_users(session: AsyncSession = Depends(get_session)) -> list[UserOut]:
+    rows = (await session.execute(select(User).order_by(User.email))).scalars().all()
+    return [_user_out(u) for u in rows]
+
+
+@router.post("/users", response_model=UserOut)
+async def create_user(
+    data: UserCreateIn, session: AsyncSession = Depends(get_session)
+) -> UserOut:
+    import uuid as _uuid
+    if data.role not in ("user", "admin"):
+        raise HTTPException(400, "role must be 'user' or 'admin'")
+    existing = (await session.execute(select(User).where(User.email == data.email))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(409, "email already registered")
+    u = User(
+        email=data.email,
+        password_hash=hash_password(data.password),
+        role=data.role,
+    )
+    session.add(u)
+    await session.flush()
+    # Auto-create default workspace
+    session.add(Workspace(owner_id=u.id, name="Default"))
+    await session.commit()
+    await session.refresh(u)
+    return _user_out(u)
+
+
+@router.put("/users/{uid}", response_model=UserOut)
+async def update_user(
+    uid: str, data: UserUpdateIn, session: AsyncSession = Depends(get_session)
+) -> UserOut:
+    import uuid as _uuid
+    u = await session.get(User, _uuid.UUID(uid).bytes)
+    if not u:
+        raise HTTPException(404, "user not found")
+    if data.email is not None:
+        dup = (await session.execute(select(User).where(User.email == data.email, User.id != u.id))).scalar_one_or_none()
+        if dup:
+            raise HTTPException(409, "email already registered")
+        u.email = data.email
+    if data.password is not None:
+        u.password_hash = hash_password(data.password)
+    if data.role is not None:
+        if data.role not in ("user", "admin"):
+            raise HTTPException(400, "role must be 'user' or 'admin'")
+        u.role = data.role
+    await session.commit()
+    await session.refresh(u)
+    return _user_out(u)
+
+
+@router.delete("/users/{uid}")
+async def delete_user(
+    uid: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_admin),
+) -> dict:
+    import uuid as _uuid
+    target_id = _uuid.UUID(uid).bytes
+    if target_id == current_user.id:
+        raise HTTPException(400, "cannot delete yourself")
+    u = await session.get(User, target_id)
+    if not u:
+        raise HTTPException(404, "user not found")
+    # Delete workspace(s) and cascade data
+    workspaces = (await session.execute(select(Workspace).where(Workspace.owner_id == target_id))).scalars().all()
+    for ws in workspaces:
+        note_ids = select(Note.id).where(Note.workspace_id == ws.id)
+        await session.execute(delete(NoteChunk).where(NoteChunk.note_id.in_(note_ids)))
+        await session.execute(delete(NoteAsset).where(NoteAsset.note_id.in_(note_ids)))
+        await session.execute(delete(Task).where(Task.workspace_id == ws.id))
+        await session.execute(
+            update(Note).where(Note.workspace_id == ws.id).values(parent_id=None)
+        )
+        await session.execute(delete(Note).where(Note.workspace_id == ws.id))
+    await session.execute(delete(Workspace).where(Workspace.owner_id == target_id))
+    await session.execute(delete(User).where(User.id == target_id))
+    await session.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# KI-Provider
+# ---------------------------------------------------------------------------
 
 def to_out(r: AIProvider) -> ProviderOut:
     return ProviderOut(
@@ -187,25 +286,79 @@ async def get_app_settings(session: AsyncSession = Depends(get_session)) -> dict
         m = int(minutes)
     except (TypeError, ValueError):
         m = DEFAULT_SESSION_LIFETIME_MINUTES
-    return {"session_lifetime_minutes": m}
+    auto_close = await get_setting(session, "auto_close_days", 30)
+    try:
+        acd = int(auto_close)
+    except (TypeError, ValueError):
+        acd = 30
+    return {
+        "session_lifetime_minutes": m,
+        "auto_close_days": acd,
+        "smtp_host": await get_setting(session, "smtp_host", ""),
+        "smtp_port": int(await get_setting(session, "smtp_port", 587)),
+        "smtp_user": await get_setting(session, "smtp_user", ""),
+        "smtp_password": await get_setting(session, "smtp_password", ""),
+        "smtp_from": await get_setting(session, "smtp_from", ""),
+        "smtp_use_tls": bool(await get_setting(session, "smtp_use_tls", True)),
+    }
 
 
 @router.put("/settings")
 async def update_app_settings(
     payload: dict, session: AsyncSession = Depends(get_session)
 ) -> dict:
-    raw = payload.get("session_lifetime_minutes")
-    try:
-        m = int(raw)
-    except (TypeError, ValueError) as e:
-        raise HTTPException(400, "invalid session_lifetime_minutes") from e
-    if m < MIN_SESSION_LIFETIME_MINUTES or m > MAX_SESSION_LIFETIME_MINUTES:
-        raise HTTPException(
-            400,
-            f"out of range ({MIN_SESSION_LIFETIME_MINUTES}..{MAX_SESSION_LIFETIME_MINUTES})",
-        )
-    await set_setting(session, "session_lifetime_minutes", m)
-    return {"session_lifetime_minutes": m}
+    result = {}
+    if "session_lifetime_minutes" in payload:
+        raw = payload["session_lifetime_minutes"]
+        try:
+            m = int(raw)
+        except (TypeError, ValueError) as e:
+            raise HTTPException(400, "invalid session_lifetime_minutes") from e
+        if m < MIN_SESSION_LIFETIME_MINUTES or m > MAX_SESSION_LIFETIME_MINUTES:
+            raise HTTPException(
+                400,
+                f"out of range ({MIN_SESSION_LIFETIME_MINUTES}..{MAX_SESSION_LIFETIME_MINUTES})",
+            )
+        await set_setting(session, "session_lifetime_minutes", m)
+        result["session_lifetime_minutes"] = m
+    if "auto_close_days" in payload:
+        raw = payload["auto_close_days"]
+        try:
+            d = int(raw)
+        except (TypeError, ValueError) as e:
+            raise HTTPException(400, "invalid auto_close_days") from e
+        if d < 0 or d > 3650:
+            raise HTTPException(400, "auto_close_days out of range (0..3650)")
+        await set_setting(session, "auto_close_days", d)
+        result["auto_close_days"] = d
+    # SMTP-Einstellungen
+    smtp_keys = {
+        "smtp_host": str,
+        "smtp_user": str,
+        "smtp_password": str,
+        "smtp_from": str,
+    }
+    for key, conv in smtp_keys.items():
+        if key in payload:
+            val = conv(payload[key])
+            await set_setting(session, key, val)
+            result[key] = val
+    if "smtp_port" in payload:
+        try:
+            port = int(payload["smtp_port"])
+        except (TypeError, ValueError) as e:
+            raise HTTPException(400, "invalid smtp_port") from e
+        if port < 1 or port > 65535:
+            raise HTTPException(400, "smtp_port out of range (1..65535)")
+        await set_setting(session, "smtp_port", port)
+        result["smtp_port"] = port
+    if "smtp_use_tls" in payload:
+        val = bool(payload["smtp_use_tls"])
+        await set_setting(session, "smtp_use_tls", val)
+        result["smtp_use_tls"] = val
+    if not result:
+        raise HTTPException(400, "no valid settings in payload")
+    return result
 @router.get("/ai/prompts")
 async def list_prompts() -> list[str]:
     return sorted(p.stem for p in PROMPTS_DIR.glob("*.md"))
