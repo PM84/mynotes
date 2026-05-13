@@ -18,7 +18,7 @@ from ..models import Note, User
 from ..schemas import (
     AIContradictionsIn, AIRagIn, AIRagOut, AISummarizeIn,
     AICanvasIn, AIExtractTasksIn, AIMemoIn, AIMemoSendIn,
-    MemoOut,
+    MemoOut, MemoUpdateIn,
 )
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -475,6 +475,7 @@ async def send_memo(
 ) -> dict:
     """Sendet ein gespeichertes Memo per E-Mail."""
     import re
+    import markdown as md
     from ..email import send_email
     from ..models import Memo
 
@@ -489,8 +490,10 @@ async def send_memo(
     n = await session.get(Note, memo.note_id) if memo.note_id else None
     subject = f"Aktennotiz: {n.title}" if n else "Aktennotiz"
 
+    body_html = md.markdown(memo.content, extensions=["tables", "fenced_code"])
+
     try:
-        await send_email(session, data.recipient, subject, memo.content)
+        await send_email(session, data.recipient, subject, memo.content, body_html)
     except RuntimeError as e:
         raise HTTPException(503, str(e))
     except Exception as e:
@@ -582,6 +585,26 @@ async def list_memos(
         ))
 
     return result
+
+
+@router.put("/memos/{memo_id}")
+async def update_memo(
+    memo_id: uuid.UUID,
+    data: MemoUpdateIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Aktualisiert den Inhalt eines Memos."""
+    from ..deps import get_default_workspace
+    from ..models import Memo
+
+    ws = await get_default_workspace(user, session)
+    memo = await session.get(Memo, memo_id.bytes)
+    if not memo or memo.workspace_id != ws.id:
+        raise HTTPException(404, "memo not found")
+    memo.content = data.content
+    await session.commit()
+    return {"ok": True}
 
 
 @router.delete("/memos/{memo_id}")

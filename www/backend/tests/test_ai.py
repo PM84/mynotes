@@ -381,7 +381,7 @@ async def test_memo_send_saves_recent_address(client: AsyncClient, auth_headers:
     """Nach erfolgreichem Versand wird die Adresse in der Recent-Liste gespeichert."""
     import app.email as email_mod
 
-    async def _fake_send(session, to, subject, body_text):
+    async def _fake_send(session, to, subject, body_text, body_html=None):
         pass  # kein echter SMTP
 
     monkeypatch.setattr(email_mod, "send_email", _fake_send)
@@ -409,7 +409,7 @@ async def test_memo_addresses_max_three(client: AsyncClient, auth_headers: dict,
     """Maximal 3 Adressen werden gespeichert, neueste zuerst."""
     import app.email as email_mod
 
-    async def _fake_send(session, to, subject, body_text):
+    async def _fake_send(session, to, subject, body_text, body_html=None):
         pass
 
     monkeypatch.setattr(email_mod, "send_email", _fake_send)

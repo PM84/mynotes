@@ -12,9 +12,13 @@ from .app_settings import get_setting
 log = logging.getLogger(__name__)
 
 
-async def send_email(session: AsyncSession, to: str, subject: str, body_text: str) -> None:
-    """Sendet eine Klartext-Mail an *to*.
+async def send_email(
+    session: AsyncSession, to: str, subject: str, body_text: str, body_html: str | None = None,
+) -> None:
+    """Sendet eine Mail an *to*.
 
+    Wenn *body_html* angegeben wird, wird eine multipart/alternative-Mail
+    (text + html) gesendet. Ansonsten nur Klartext.
     SMTP-Einstellungen werden aus den App-Settings (DB) gelesen.
     Wirft RuntimeError, wenn SMTP nicht konfiguriert ist, und lässt
     aiosmtplib-Fehler durchblasen.
@@ -34,6 +38,8 @@ async def send_email(session: AsyncSession, to: str, subject: str, body_text: st
     msg["From"] = from_addr or user
     msg["To"] = to
     msg.set_content(body_text)
+    if body_html:
+        msg.add_alternative(body_html, subtype="html")
 
     log.info("Sending email to=%s subject=%s via %s:%s", to, subject, host, port)
     await aiosmtplib.send(

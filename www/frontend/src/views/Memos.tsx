@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { apiJson } from "../api";
 import { toast } from "sonner";
 import { Link, useSearchParams } from "react-router-dom";
-import { FileText, Loader2, Mail, Printer, Search, Send, Trash2, X } from "lucide-react";
+import { Check, FileText, Loader2, Mail, Pencil, Printer, Search, Send, Trash2, X } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { renderToStaticMarkup } from "react-dom/server";
 
 type Memo = {
   id: string;
@@ -28,6 +31,11 @@ export function Memos() {
 
   // Expanded memo (to view full content)
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Edit state
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQuery(query), 300);
@@ -61,6 +69,20 @@ export function Memos() {
       toast.success("Memo gelöscht");
     } catch (e: any) {
       toast.error("Löschen fehlgeschlagen: " + e.message);
+    }
+  }
+
+  async function saveMemo(id: string) {
+    setEditSaving(true);
+    try {
+      await apiJson(`/ai/memos/${id}`, "PUT", { content: editContent });
+      setMemos((prev) => prev.map((m) => m.id === id ? { ...m, content: editContent } : m));
+      setEditId(null);
+      toast.success("Memo gespeichert");
+    } catch (e: any) {
+      toast.error("Speichern fehlgeschlagen: " + e.message);
+    } finally {
+      setEditSaving(false);
     }
   }
 
@@ -101,26 +123,25 @@ export function Memos() {
     const dateStr = new Date(memo.created_at).toLocaleDateString("de-DE", {
       year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
     });
-    // Convert markdown-ish content to basic HTML
-    const htmlContent = memo.content
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/^### (.+)$/gm, "<h3>$1</h3>")
-      .replace(/^## (.+)$/gm, "<h2>$1</h2>")
-      .replace(/^# (.+)$/gm, "<h1>$1</h1>")
-      .replace(/^- (.+)$/gm, "<li>$1</li>")
-      .replace(/\n{2,}/g, "</p><p>")
-      .replace(/\n/g, "<br>");
+    const htmlContent = renderToStaticMarkup(
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{memo.content}</ReactMarkdown>
+    );
     printWindow.document.write(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Aktennotiz</title>
 <style>
   body { font-family: serif; max-width: 700px; margin: 2rem auto; line-height: 1.6; color: #222; }
   h1, h2, h3 { margin-top: 1rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { border: 1px solid #ccc; padding: 0.4rem 0.8rem; text-align: left; }
+  th { background: #f5f5f5; }
+  code { background: #f0f0f0; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+  pre { background: #f0f0f0; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+  blockquote { border-left: 3px solid #ccc; margin-left: 0; padding-left: 1rem; color: #555; }
   .meta { color: #666; font-size: 0.9em; margin-bottom: 1.5rem; border-bottom: 1px solid #ccc; padding-bottom: 0.5rem; }
   @media print { body { margin: 0; } }
 </style></head><body>
 <div class="meta">${memo.note_title ? `Notiz: ${memo.note_title}<br>` : ""}Erstellt: ${dateStr}</div>
-<div><p>${htmlContent}</p></div>
+<div>${htmlContent}</div>
 </body></html>`);
     printWindow.document.close();
     printWindow.focus();
@@ -176,7 +197,8 @@ export function Memos() {
       <div className="space-y-3">
         {memos.map((m) => {
           const isExpanded = expandedId === m.id;
-          const preview = m.content.length > 200 && !isExpanded
+          const isEditing = editId === m.id;
+          const preview = m.content.length > 200 && !isExpanded && !isEditing
             ? m.content.slice(0, 200) + "…"
             : m.content;
 
@@ -198,22 +220,61 @@ export function Memos() {
                     )}
                     <span className="text-xs text-slate-400 shrink-0">{fmt(m.created_at)}</span>
                   </div>
-                  <div
-                    className="text-sm text-slate-700 whitespace-pre-wrap cursor-pointer"
-                    onClick={() => setExpandedId(isExpanded ? null : m.id)}
-                  >
-                    {preview}
-                  </div>
-                  {m.content.length > 200 && (
-                    <button
-                      className="text-xs text-blue-500 hover:underline mt-1"
-                      onClick={() => setExpandedId(isExpanded ? null : m.id)}
-                    >
-                      {isExpanded ? "Weniger anzeigen" : "Mehr anzeigen"}
-                    </button>
+                  {isEditing ? (
+                    <div className="mt-1">
+                      <textarea
+                        className="w-full border rounded p-2 text-sm font-mono min-h-[200px]"
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                      />
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={() => saveMemo(m.id)}
+                          disabled={editSaving}
+                          className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {editSaving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                          Speichern
+                        </button>
+                        <button
+                          onClick={() => setEditId(null)}
+                          className="px-3 py-1.5 text-sm border rounded hover:bg-slate-100"
+                        >
+                          Abbrechen
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div
+                        className="text-sm text-slate-700 cursor-pointer prose prose-sm max-w-none"
+                        onClick={() => setExpandedId(isExpanded ? null : m.id)}
+                      >
+                        {isExpanded ? (
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                        ) : (
+                          <span className="whitespace-pre-wrap">{preview}</span>
+                        )}
+                      </div>
+                      {m.content.length > 200 && (
+                        <button
+                          className="text-xs text-blue-500 hover:underline mt-1"
+                          onClick={() => setExpandedId(isExpanded ? null : m.id)}
+                        >
+                          {isExpanded ? "Weniger anzeigen" : "Mehr anzeigen"}
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => { setEditId(m.id); setEditContent(m.content); setExpandedId(null); }}
+                    className="p-1.5 hover:bg-slate-100 rounded text-slate-500 hover:text-amber-600"
+                    title="Bearbeiten"
+                  >
+                    <Pencil size={16} />
+                  </button>
                   <button
                     onClick={() => openEmailDialog(m.id)}
                     className="p-1.5 hover:bg-slate-100 rounded text-slate-500 hover:text-blue-600"

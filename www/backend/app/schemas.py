@@ -131,6 +131,10 @@ class AIMemoSendIn(BaseModel):
     recipient: str  # E-Mail-Adresse
 
 
+class MemoUpdateIn(BaseModel):
+    content: str
+
+
 # ---------- Memos ----------
 
 class MemoOut(BaseModel):
