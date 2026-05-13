@@ -62,6 +62,7 @@ export function Admin() {
   const [backendVersion, setBackendVersion] = useState<string>("…");
   const [smtp, setSmtp] = useState({ host: "", port: "587", user: "", password: "", from: "", use_tls: true });
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [backup, setBackup] = useState({ enabled: false, retention_days: "7", nextcloud_url: "", nextcloud_user: "", nextcloud_password: "", nextcloud_backup_path: "/mynotes-backups" });
   const [editingUser, setEditingUser] = useState<{ id?: string; email: string; password: string; role: string } | null>(null);
 
   async function reload() {
@@ -75,12 +76,13 @@ export function Admin() {
       setBackendVersion("?");
     }
     try {
-      const s = await api<{ session_lifetime_minutes: number; auto_close_days: number; smtp_host: string; smtp_port: number; smtp_user: string; smtp_password: string; smtp_from: string; smtp_use_tls: boolean }>("/admin/settings");
+      const s = await api<{ session_lifetime_minutes: number; auto_close_days: number; smtp_host: string; smtp_port: number; smtp_user: string; smtp_password: string; smtp_from: string; smtp_use_tls: boolean; backup_enabled: boolean; backup_retention_days: number; nextcloud_url: string; nextcloud_user: string; nextcloud_password: string; nextcloud_backup_path: string }>("/admin/settings");
       setSessionMinutes(s.session_lifetime_minutes);
       setSessionMinutesInput(String(s.session_lifetime_minutes));
       setAutoCloseDays(s.auto_close_days);
       setAutoCloseDaysInput(String(s.auto_close_days));
       setSmtp({ host: s.smtp_host || "", port: String(s.smtp_port || 587), user: s.smtp_user || "", password: s.smtp_password || "", from: s.smtp_from || "", use_tls: s.smtp_use_tls ?? true });
+      setBackup({ enabled: !!s.backup_enabled, retention_days: String(s.backup_retention_days ?? 7), nextcloud_url: s.nextcloud_url || "", nextcloud_user: s.nextcloud_user || "", nextcloud_password: s.nextcloud_password || "", nextcloud_backup_path: s.nextcloud_backup_path || "/mynotes-backups" });
     } catch {
       // optional
     }
@@ -215,6 +217,22 @@ export function Admin() {
         smtp_use_tls: smtp.use_tls,
       });
       toast.success("SMTP-Einstellungen gespeichert.");
+    } catch (e: any) {
+      toast.error("Fehler: " + e.message);
+    }
+  }
+
+  async function saveBackup() {
+    try {
+      await apiJson("/admin/settings", "PUT", {
+        backup_enabled: backup.enabled,
+        backup_retention_days: parseInt(backup.retention_days, 10) || 7,
+        nextcloud_url: backup.nextcloud_url,
+        nextcloud_user: backup.nextcloud_user,
+        nextcloud_password: backup.nextcloud_password,
+        nextcloud_backup_path: backup.nextcloud_backup_path,
+      });
+      toast.success("Backup-Einstellungen gespeichert.");
     } catch (e: any) {
       toast.error("Fehler: " + e.message);
     }
@@ -518,6 +536,28 @@ export function Admin() {
             />
           </label>
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold mb-3">Automatisches Backup (Nextcloud)</h2>
+        <p className="text-sm text-slate-600 mb-3">
+          Täglich wird ein vollständiges Backup per WebDAV in die Nextcloud hochgeladen.
+          Ältere Backups werden automatisch gelöscht, sodass nur die letzten <em>n</em> Tage aufbewahrt werden.
+        </p>
+        <div className="grid grid-cols-2 gap-2 max-w-lg">
+          <label className="flex items-center gap-2 text-sm col-span-2">
+            <input type="checkbox" checked={backup.enabled} onChange={(e) => setBackup({ ...backup, enabled: e.target.checked })} /> Automatisches Backup aktiviert
+          </label>
+          <input className="border rounded px-2 py-1 col-span-2" placeholder="Nextcloud WebDAV-URL (z. B. https://cloud.example.com/remote.php/dav/files/user)" value={backup.nextcloud_url} onChange={(e) => setBackup({ ...backup, nextcloud_url: e.target.value })} />
+          <input className="border rounded px-2 py-1" placeholder="Benutzername" value={backup.nextcloud_user} onChange={(e) => setBackup({ ...backup, nextcloud_user: e.target.value })} />
+          <input className="border rounded px-2 py-1" placeholder="Passwort" type="password" value={backup.nextcloud_password} onChange={(e) => setBackup({ ...backup, nextcloud_password: e.target.value })} />
+          <input className="border rounded px-2 py-1 col-span-2" placeholder="Backup-Pfad (z. B. /mynotes-backups)" value={backup.nextcloud_backup_path} onChange={(e) => setBackup({ ...backup, nextcloud_backup_path: e.target.value })} />
+          <div className="col-span-2 flex items-center gap-2">
+            <input type="number" min={1} max={365} className="border rounded px-2 py-1 w-24" value={backup.retention_days} onChange={(e) => setBackup({ ...backup, retention_days: e.target.value })} />
+            <span className="text-sm text-slate-500">Tage aufbewahren</span>
+          </div>
+        </div>
+        <button onClick={saveBackup} className="mt-3 px-3 py-1 bg-slate-900 text-white rounded">Speichern</button>
       </section>
 
       <section>

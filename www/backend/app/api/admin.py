@@ -300,6 +300,12 @@ async def get_app_settings(session: AsyncSession = Depends(get_session)) -> dict
         "smtp_password": await get_setting(session, "smtp_password", ""),
         "smtp_from": await get_setting(session, "smtp_from", ""),
         "smtp_use_tls": bool(await get_setting(session, "smtp_use_tls", True)),
+        "backup_enabled": bool(await get_setting(session, "backup_enabled", False)),
+        "backup_retention_days": int(await get_setting(session, "backup_retention_days", 7)),
+        "nextcloud_url": await get_setting(session, "nextcloud_url", ""),
+        "nextcloud_user": await get_setting(session, "nextcloud_user", ""),
+        "nextcloud_password": await get_setting(session, "nextcloud_password", ""),
+        "nextcloud_backup_path": await get_setting(session, "nextcloud_backup_path", "/mynotes-backups"),
     }
 
 
@@ -356,6 +362,27 @@ async def update_app_settings(
         val = bool(payload["smtp_use_tls"])
         await set_setting(session, "smtp_use_tls", val)
         result["smtp_use_tls"] = val
+    # Nextcloud-Backup-Einstellungen
+    if "backup_enabled" in payload:
+        val = bool(payload["backup_enabled"])
+        await set_setting(session, "backup_enabled", val)
+        result["backup_enabled"] = val
+    if "backup_retention_days" in payload:
+        raw = payload["backup_retention_days"]
+        try:
+            d = int(raw)
+        except (TypeError, ValueError) as e:
+            raise HTTPException(400, "invalid backup_retention_days") from e
+        if d < 1 or d > 365:
+            raise HTTPException(400, "backup_retention_days out of range (1..365)")
+        await set_setting(session, "backup_retention_days", d)
+        result["backup_retention_days"] = d
+    nc_str_keys = ["nextcloud_url", "nextcloud_user", "nextcloud_password", "nextcloud_backup_path"]
+    for key in nc_str_keys:
+        if key in payload:
+            val = str(payload[key])
+            await set_setting(session, key, val)
+            result[key] = val
     if not result:
         raise HTTPException(400, "no valid settings in payload")
     return result
@@ -431,38 +458,51 @@ def _row_to_dict(row) -> dict:
     return out
 
 
+async def create_backup_zip(session: AsyncSession | None = None) -> io.BytesIO:
+    """Create a full backup ZIP in memory and return the BytesIO buffer."""
+    from ..db import SessionLocal
+
+    own_session = session is None
+    if own_session:
+        session = SessionLocal()
+    try:
+        settings = get_settings()
+        asset_dir = Path(settings.asset_dir)
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            manifest = {
+                "version": BACKUP_VERSION,
+                "created_at": datetime.utcnow().isoformat() + "Z",
+                "tables": [name for name, _ in BACKUP_TABLES],
+            }
+
+            for name, model in BACKUP_TABLES:
+                rows = (await session.execute(select(model))).scalars().all()
+                data = [_row_to_dict(r) for r in rows]
+                zf.writestr(f"db/{name}.json", json.dumps(data, ensure_ascii=False, indent=2))
+
+            if asset_dir.exists():
+                for p in asset_dir.iterdir():
+                    if p.is_file():
+                        zf.write(p, arcname=f"assets/{p.name}")
+
+            if PROMPTS_DIR.exists():
+                for p in PROMPTS_DIR.glob("*.md"):
+                    zf.write(p, arcname=f"prompts/{p.name}")
+
+            zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+
+        buf.seek(0)
+        return buf
+    finally:
+        if own_session:
+            await session.close()
+
+
 @router.get("/backup")
 async def create_backup(session: AsyncSession = Depends(get_session)):
-    settings = get_settings()
-    asset_dir = Path(settings.asset_dir)
-
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        manifest = {
-            "version": BACKUP_VERSION,
-            "created_at": datetime.utcnow().isoformat() + "Z",
-            "tables": [name for name, _ in BACKUP_TABLES],
-        }
-
-        for name, model in BACKUP_TABLES:
-            rows = (await session.execute(select(model))).scalars().all()
-            data = [_row_to_dict(r) for r in rows]
-            zf.writestr(f"db/{name}.json", json.dumps(data, ensure_ascii=False, indent=2))
-
-        # Asset-Dateien (per sha256-Dateiname im ASSET_DIR abgelegt)
-        if asset_dir.exists():
-            for p in asset_dir.iterdir():
-                if p.is_file():
-                    zf.write(p, arcname=f"assets/{p.name}")
-
-        # Aktuelle Prompts
-        if PROMPTS_DIR.exists():
-            for p in PROMPTS_DIR.glob("*.md"):
-                zf.write(p, arcname=f"prompts/{p.name}")
-
-        zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
-
-    buf.seek(0)
+    buf = await create_backup_zip(session)
     ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     filename = f"mynotes-backup-{ts}.zip"
     return StreamingResponse(
