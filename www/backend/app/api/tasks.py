@@ -111,12 +111,9 @@ async def upsert_task(
     t.status = data.status
     t.priority = data.priority
     t.position = data.position
-    if data.due_date is not None:
-        t.due_date = data.due_date
-    if data.tags is not None:
-        t.tags = data.tags
-    if data.closed_at is not None:
-        t.closed_at = data.closed_at
+    t.due_date = data.due_date
+    t.tags = data.tags
+    t.closed_at = data.closed_at
     await session.commit()
     await session.refresh(t)
     out = to_out(t)

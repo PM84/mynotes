@@ -122,6 +122,89 @@ async def test_task_with_note_id(client: AsyncClient, auth_headers: dict):
     assert r.json()["note_id"] == nid
 
 
+async def test_tags_create_with_tags(client: AsyncClient, auth_headers: dict):
+    """Tags werden beim Erstellen korrekt gespeichert und zurückgegeben."""
+    tid = str(uuid.uuid4())
+    r = await client.put(
+        f"/tasks/{tid}",
+        json={"title": "Tagged", "status": "todo", "tags": ["bug", "prio"]},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    out = r.json()
+    assert out["tags"] == ["bug", "prio"]
+
+    # Auch beim erneuten Lesen noch vorhanden
+    r = await client.get(f"/tasks/{tid}", headers=auth_headers)
+    assert r.json()["tags"] == ["bug", "prio"]
+
+
+async def test_tags_update_adds_tags(client: AsyncClient, auth_headers: dict):
+    """Nachträgliches Hinzufügen von Tags funktioniert."""
+    tid = str(uuid.uuid4())
+    r = await client.put(
+        f"/tasks/{tid}",
+        json={"title": "No tags", "status": "backlog"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["tags"] is None
+
+    # Jetzt Tags hinzufügen
+    r = await client.put(
+        f"/tasks/{tid}",
+        json={"title": "No tags", "status": "backlog", "tags": ["urgent"]},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["tags"] == ["urgent"]
+
+    r = await client.get(f"/tasks/{tid}", headers=auth_headers)
+    assert r.json()["tags"] == ["urgent"]
+
+
+async def test_tags_clear(client: AsyncClient, auth_headers: dict):
+    """Tags können durch Senden von null gelöscht werden."""
+    tid = str(uuid.uuid4())
+    await client.put(
+        f"/tasks/{tid}",
+        json={"title": "T", "status": "todo", "tags": ["a", "b"]},
+        headers=auth_headers,
+    )
+
+    r = await client.put(
+        f"/tasks/{tid}",
+        json={"title": "T", "status": "todo", "tags": None},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["tags"] is None
+
+    r = await client.get(f"/tasks/{tid}", headers=auth_headers)
+    assert r.json()["tags"] is None
+
+
+async def test_tags_via_batch_sync(client: AsyncClient, auth_headers: dict):
+    """Tags über den Batch-Sync-Endpunkt."""
+    tid = str(uuid.uuid4())
+    ops = [
+        {
+            "type": "task.upsert",
+            "id": tid,
+            "data": {"title": "Sync task", "status": "doing", "tags": ["sync", "test"]},
+        }
+    ]
+    r = await client.post("/sync/batch", json=ops, headers=auth_headers)
+    assert r.status_code == 200
+    res = r.json()["results"]
+    assert res[0]["ok"] is True
+    assert res[0]["data"]["tags"] == ["sync", "test"]
+
+    # Verify via direct GET
+    r = await client.get(f"/tasks/{tid}", headers=auth_headers)
+    assert r.json()["tags"] == ["sync", "test"]
+
+
 async def test_unauthorized(client: AsyncClient):
     tid = str(uuid.uuid4())
     r = await client.put(f"/tasks/{tid}", json={"title": "x", "status": "backlog"})

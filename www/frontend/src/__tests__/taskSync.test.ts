@@ -67,4 +67,41 @@ describe("task local CRUD", () => {
     const stored = await db.tasks.get(t.id);
     expect(stored?.note_id).toBe(noteId);
   });
+
+  it("upsertTaskLocal speichert Tags korrekt", async () => {
+    const t = await upsertTaskLocal({ title: "Mit Tags", status: "todo", tags: ["bug", "prio"] });
+    expect(t.tags).toEqual(["bug", "prio"]);
+    const stored = await db.tasks.get(t.id);
+    expect(stored?.tags).toEqual(["bug", "prio"]);
+    // Tags in pending op
+    const ops = await db.pending.toArray();
+    expect(ops[0].payload.data.tags).toEqual(["bug", "prio"]);
+  });
+
+  it("upsertTaskLocal fügt Tags nachträglich hinzu", async () => {
+    const a = await upsertTaskLocal({ title: "Ohne Tags", status: "backlog" });
+    expect(a.tags).toBeNull();
+
+    const b = await upsertTaskLocal({ id: a.id, tags: ["urgent"] });
+    expect(b.tags).toEqual(["urgent"]);
+    const stored = await db.tasks.get(a.id);
+    expect(stored?.tags).toEqual(["urgent"]);
+  });
+
+  it("upsertTaskLocal löscht Tags mit null", async () => {
+    const a = await upsertTaskLocal({ title: "T", status: "todo", tags: ["a", "b"] });
+    expect(a.tags).toEqual(["a", "b"]);
+
+    const b = await upsertTaskLocal({ id: a.id, tags: null });
+    expect(b.tags).toBeNull();
+    const stored = await db.tasks.get(a.id);
+    expect(stored?.tags).toBeNull();
+  });
+
+  it("upsertTaskLocal behält Tags bei wenn nicht angegeben", async () => {
+    const a = await upsertTaskLocal({ title: "T", status: "todo", tags: ["keep"] });
+    // Update ohne tags → bestehende Tags bleiben
+    const b = await upsertTaskLocal({ id: a.id, title: "Neu" });
+    expect(b.tags).toEqual(["keep"]);
+  });
 });
