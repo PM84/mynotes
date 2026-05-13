@@ -69,6 +69,34 @@ HANDLERS = {
 }
 
 _last_auto_close = datetime.min
+_last_backup = datetime.min
+
+
+async def _daily_backup() -> None:
+    """Run Nextcloud backup once per day (if enabled in admin settings)."""
+    global _last_backup
+    now = datetime.now(timezone.utc)
+    if (now - _last_backup).total_seconds() < 86400:
+        return
+    _last_backup = now
+    try:
+        from .backup import run_daily_backup
+
+        async with SessionLocal() as s:
+            enabled = await get_setting(s, "backup_enabled", False)
+            if not enabled:
+                return
+            nc_url = await get_setting(s, "nextcloud_url", "")
+            nc_user = await get_setting(s, "nextcloud_user", "")
+            nc_password = await get_setting(s, "nextcloud_password", "")
+            nc_path = await get_setting(s, "nextcloud_backup_path", "/mynotes-backups")
+            retention = int(await get_setting(s, "backup_retention_days", 7))
+        if not nc_url or not nc_user or not nc_password:
+            return
+        await run_daily_backup(nc_url, nc_user, nc_password, nc_path, retention)
+        log.info("daily backup to Nextcloud complete")
+    except Exception as e:
+        log.warning("daily_backup error: %s", e)
 
 
 async def _auto_close_tasks() -> None:
@@ -117,6 +145,7 @@ async def loop() -> None:
     while True:
         try:
             await _auto_close_tasks()
+            await _daily_backup()
             async with SessionLocal() as s:
                 job = (
                     await s.execute(

@@ -105,35 +105,28 @@ bereinigt (Retention).
 > **Tipp**: In Nextcloud lässt sich unter *Einstellungen → Sicherheit* ein
 > App-Passwort erstellen – das ist sicherer als das Hauptpasswort.
 
-#### 2. Cronjob einrichten
+#### 2. Automatische Ausführung
 
-Das Backup-CLI läuft im Backend-Container. Auf dem Host-System wird ein
-Cronjob eingerichtet, der per `docker compose exec` den Befehl im
-laufenden Container ausführt:
-
-```sh
-crontab -e
-```
-
-Folgende Zeile einfügen (Pfade anpassen):
-
-```cron
-0 3 * * * cd /home/peter/dev/mynotes && docker compose exec -T backend python -m app.backup_cli >> /var/log/mynotes-backup.log 2>&1
-```
+Das Backup wird automatisch vom Background-Worker ausgeführt – einmal
+pro Tag, solange der Backend-Container läuft. Es ist kein externer
+Cronjob nötig.
 
 **Hinweise:**
 
-- Der Docker-Stack muss laufen, da der Befehl im Backend-Container ausgeführt wird.
-- Die Logausgabe wird in `/var/log/mynotes-backup.log` geschrieben.
+- Das Backup startet automatisch mit dem nächsten Worker-Zyklus nach
+  Container-Start, danach einmal alle 24 Stunden.
 - Ist das Backup in der Admin-UI deaktiviert oder sind die Credentials
-  unvollständig, beendet sich das CLI ohne Fehler.
-- Für Entwicklung existiert auch `bindev/backup-nextcloud.sh` als Wrapper.
+  unvollständig, wird es übersprungen.
+- Logs erscheinen im normalen Backend-Log (`docker logs <container>`).
 
 #### 3. Manuelles Backup auslösen
 
 ```sh
-# Nextcloud-Backup manuell starten (nutzt die Admin-UI-Einstellungen):
-cd /home/peter/dev/mynotes && docker compose exec -T backend python -m app.backup_cli
+# Nextcloud-Backup manuell anstoßen (innerhalb des Containers):
+docker exec -T <backend-container> python -m app.backup_cli
+
+# Lokale Entwicklung:
+bindev/backup-nextcloud.sh
 
 # Oder nur ein lokales ZIP herunterladen (Admin-API):
 curl -H "Authorization: Bearer <TOKEN>" https://api.mynotes.localhost/admin/backup -o backup.zip
