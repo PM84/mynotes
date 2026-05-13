@@ -540,10 +540,11 @@ async def get_recent_emails(
 @router.get("/memos", response_model=list[MemoOut])
 async def list_memos(
     q: str = "",
+    note_id: uuid.UUID | None = None,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> list[MemoOut]:
-    """Alle Memos des Benutzers auflisten, optional nach Suchbegriff filtern."""
+    """Alle Memos des Benutzers auflisten, optional nach Suchbegriff oder Notiz filtern."""
     from ..deps import get_default_workspace
     from ..models import Memo
 
@@ -553,6 +554,8 @@ async def list_memos(
         .where(Memo.workspace_id == ws.id)
         .order_by(Memo.created_at.desc())
     )
+    if note_id:
+        stmt = stmt.where(Memo.note_id == note_id.bytes)
     rows = (await session.execute(stmt)).scalars().all()
 
     result: list[MemoOut] = []

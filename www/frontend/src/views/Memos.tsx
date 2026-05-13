@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiJson } from "../api";
 import { toast } from "sonner";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { FileText, Loader2, Mail, Printer, Search, Send, Trash2, X } from "lucide-react";
 
 type Memo = {
@@ -13,6 +13,8 @@ type Memo = {
 };
 
 export function Memos() {
+  const [params, setParams] = useSearchParams();
+  const noteIdParam = params.get("note_id");
   const [memos, setMemos] = useState<Memo[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -32,11 +34,14 @@ export function Memos() {
     return () => clearTimeout(t);
   }, [query]);
 
-  const load = useCallback(async (q: string) => {
+  const load = useCallback(async (q: string, noteId: string | null) => {
     setLoading(true);
     try {
-      const params = q ? `?q=${encodeURIComponent(q)}` : "";
-      const data = await apiJson<Memo[]>(`/ai/memos${params}`, "GET");
+      const sp = new URLSearchParams();
+      if (q) sp.set("q", q);
+      if (noteId) sp.set("note_id", noteId);
+      const qs = sp.toString();
+      const data = await apiJson<Memo[]>(`/ai/memos${qs ? `?${qs}` : ""}`, "GET");
       setMemos(data);
     } catch (e: any) {
       toast.error("Memos laden fehlgeschlagen: " + e.message);
@@ -46,8 +51,8 @@ export function Memos() {
   }, []);
 
   useEffect(() => {
-    void load(debouncedQuery);
-  }, [debouncedQuery, load]);
+    void load(debouncedQuery, noteIdParam);
+  }, [debouncedQuery, noteIdParam, load]);
 
   async function deleteMemo(id: string) {
     try {
@@ -130,6 +135,20 @@ export function Memos() {
   return (
     <div className="max-w-4xl mx-auto p-4">
       <h1 className="text-2xl font-bold mb-4">Aktennotizen</h1>
+
+      {noteIdParam && (
+        <div className="flex items-center gap-2 mb-3 text-sm text-slate-600 bg-slate-100 rounded px-3 py-2">
+          <FileText size={14} />
+          <span>Gefiltert nach Notiz</span>
+          <button
+            onClick={() => setParams({})}
+            className="ml-auto text-slate-400 hover:text-slate-700"
+            title="Filter entfernen"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Search bar */}
       <div className="relative mb-4">

@@ -7,7 +7,7 @@ import { v4 as uuid } from "uuid";
 import { sendLive, subscribeLive } from "../realtime";
 import { apiJson } from "../api";
 import { toast } from "sonner";
-import { ArrowLeft, CheckSquare, Columns, FileText, FolderInput, Image as ImageIcon, ListChecks, Loader2, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, Send, Sparkles, Tag, X } from "lucide-react";
+import { ArrowLeft, CheckSquare, Columns, FileText, FolderInput, Image as ImageIcon, ListChecks, Loader2, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, ScrollText, Send, Sparkles, Tag, X } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = lazy(() =>
@@ -242,6 +242,16 @@ export function NoteEditor() {
   const [recentEmails, setRecentEmails] = useState<string[]>([]);
   const [emailSending, setEmailSending] = useState(false);
 
+  // --- Memo-Existenz prüfen ---
+  const [hasMemo, setHasMemo] = useState(false);
+  useEffect(() => {
+    if (!id) return;
+    setHasMemo(false);
+    apiJson<{ id: string }[]>(`/ai/memos?note_id=${id}`, "GET")
+      .then((data) => setHasMemo(data.length > 0))
+      .catch(() => {});
+  }, [id]);
+
   /** IDs aller Nachkommen ermitteln (um Zyklen zu verhindern). */
   function getDescendantIds(noteId: string, notes: typeof allNotes): Set<string> {
     const desc = new Set<string>();
@@ -435,6 +445,7 @@ export function NoteEditor() {
       });
       setMemoId(r.id);
       setMemoText(r.content);
+      setHasMemo(true);
       // Letzte Adressen laden
       try {
         const a = await apiJson<{ addresses: string[] }>("/ai/memo/addresses", "GET");
@@ -595,7 +606,17 @@ export function NoteEditor() {
           <span className="text-xs text-slate-400 whitespace-nowrap mr-2" title="Erstellt am">
             {new Date(note.created_at).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}
           </span>
-        )}        <button
+        )}
+        {hasMemo && (
+          <Link
+            to={`/memos?note_id=${id}`}
+            className="flex items-center gap-1 px-2 py-1 mr-1 text-xs text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded whitespace-nowrap"
+            title="Memos zu dieser Notiz anzeigen"
+          >
+            <ScrollText size={14} /> Memo
+          </Link>
+        )}
+        <button
           onClick={() => setFullscreen((v) => !v)}
           className="p-2 mr-2 hover:bg-slate-100 rounded text-slate-600"
           title={fullscreen ? "Normalansicht (Esc)" : "Vollbild"}
