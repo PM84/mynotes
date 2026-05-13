@@ -199,9 +199,6 @@ export function Memos() {
         {memos.map((m) => {
           const isExpanded = expandedId === m.id;
           const isEditing = editId === m.id;
-          const preview = m.content.length > 200 && !isExpanded && !isEditing
-            ? m.content.slice(0, 200) + "…"
-            : m.content;
 
           return (
             <div key={m.id} className="border rounded-lg bg-white shadow-sm">
@@ -248,14 +245,10 @@ export function Memos() {
                   ) : (
                     <>
                       <div
-                        className="text-sm text-slate-700 cursor-pointer prose prose-sm max-w-none"
+                        className={`text-sm text-slate-700 cursor-pointer prose prose-sm max-w-none ${!isExpanded && m.content.length > 200 ? "max-h-24 overflow-hidden" : ""}`}
                         onClick={() => setExpandedId(isExpanded ? null : m.id)}
                       >
-                        {isExpanded ? (
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
-                        ) : (
-                          <span className="whitespace-pre-wrap">{preview}</span>
-                        )}
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
                       </div>
                       {m.content.length > 200 && (
                         <button
