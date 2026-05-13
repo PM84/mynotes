@@ -40,18 +40,27 @@ export function Notes() {
 
   // Delete-Bestätigungsdialog
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; childCount: number } | null>(null);
+  const [deleteStep, setDeleteStep] = useState<"choose" | "confirm-single" | "confirm-reparent" | "confirm-all">("choose");
+  const [confirmInput, setConfirmInput] = useState("");
 
   async function requestDelete(id: string, title: string) {
     const children = await getChildren(id);
+    setDeleteStep("choose");
+    setConfirmInput("");
     if (children.length === 0) {
-      // Keine Kinder → einfache Bestätigung
       setDeleteTarget({ id, title, childCount: 0 });
     } else {
       setDeleteTarget({ id, title, childCount: children.length });
     }
   }
 
-  async function confirmDelete(mode: "single" | "all" | "reparent") {
+  function cancelDelete() {
+    setDeleteTarget(null);
+    setDeleteStep("choose");
+    setConfirmInput("");
+  }
+
+  async function executeDelete(mode: "single" | "all" | "reparent") {
     if (!deleteTarget) return;
     if (mode === "reparent") {
       await reparentChildren(deleteTarget.id);
@@ -61,7 +70,7 @@ export function Notes() {
     } else {
       await deleteNoteLocal(deleteTarget.id);
     }
-    setDeleteTarget(null);
+    cancelDelete();
   }
 
   function toggle(id: string) {
@@ -216,18 +225,18 @@ export function Notes() {
               <AlertTriangle size={20} />
               <h3 className="font-semibold text-lg">Notiz löschen</h3>
             </div>
-            <p className="text-sm text-slate-700 mb-4">
-              Möchtest du <strong>{deleteTarget.title}</strong> wirklich löschen?
-            </p>
-            {deleteTarget.childCount > 0 ? (
+
+            {/* Schritt 1: Auswahl (bei Kindnotizen) */}
+            {deleteStep === "choose" && deleteTarget.childCount > 0 && (
               <>
-                <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-4">
-                  Diese Notiz hat <strong>{deleteTarget.childCount}</strong> untergeordnete{" "}
+                <p className="text-sm text-slate-700 mb-3">
+                  <strong>{deleteTarget.title}</strong> hat{" "}
+                  <strong>{deleteTarget.childCount}</strong> untergeordnete{" "}
                   {deleteTarget.childCount === 1 ? "Notiz" : "Notizen"}.
                 </p>
                 <div className="flex flex-col gap-2">
                   <button
-                    onClick={() => confirmDelete("reparent")}
+                    onClick={() => setDeleteStep("confirm-reparent")}
                     className="w-full px-4 py-2 rounded text-sm bg-slate-100 hover:bg-slate-200 text-left"
                   >
                     <strong>Nur diese Notiz löschen</strong>
@@ -236,7 +245,7 @@ export function Notes() {
                     </span>
                   </button>
                   <button
-                    onClick={() => confirmDelete("all")}
+                    onClick={() => { setConfirmInput(""); setDeleteStep("confirm-all"); }}
                     className="w-full px-4 py-2 rounded text-sm bg-red-50 hover:bg-red-100 text-red-700 text-left"
                   >
                     <strong>Alles löschen</strong>
@@ -245,28 +254,96 @@ export function Notes() {
                     </span>
                   </button>
                   <button
-                    onClick={() => setDeleteTarget(null)}
+                    onClick={cancelDelete}
                     className="w-full px-4 py-2 rounded text-sm border hover:bg-slate-50"
                   >
                     Abbrechen
                   </button>
                 </div>
               </>
-            ) : (
-              <div className="flex gap-2 justify-end">
-                <button
-                  onClick={() => setDeleteTarget(null)}
-                  className="px-4 py-2 rounded text-sm border hover:bg-slate-50"
-                >
-                  Abbrechen
-                </button>
-                <button
-                  onClick={() => confirmDelete("single")}
-                  className="px-4 py-2 rounded text-sm bg-red-600 text-white hover:bg-red-700"
-                >
-                  Löschen
-                </button>
-              </div>
+            )}
+
+            {/* Schritt 1: Einfache Bestätigung (ohne Kindnotizen) */}
+            {deleteStep === "choose" && deleteTarget.childCount === 0 && (
+              <>
+                <p className="text-sm text-slate-700 mb-4">
+                  Möchtest du <strong>{deleteTarget.title}</strong> wirklich löschen?
+                </p>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={cancelDelete}
+                    className="px-4 py-2 rounded text-sm border hover:bg-slate-50"
+                  >
+                    Abbrechen
+                  </button>
+                  <button
+                    onClick={() => executeDelete("single")}
+                    className="px-4 py-2 rounded text-sm bg-red-600 text-white hover:bg-red-700"
+                  >
+                    Löschen
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Schritt 2: Bestätigung für "Nur diese Notiz löschen" */}
+            {deleteStep === "confirm-reparent" && (
+              <>
+                <p className="text-sm text-slate-700 mb-4">
+                  Bist du sicher, dass du <strong>{deleteTarget.title}</strong> löschen möchtest?
+                  Die {deleteTarget.childCount} Unternotiz{deleteTarget.childCount !== 1 && "en"} werden eine Ebene höher verschoben.
+                </p>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setDeleteStep("choose")}
+                    className="px-4 py-2 rounded text-sm border hover:bg-slate-50"
+                  >
+                    Zurück
+                  </button>
+                  <button
+                    onClick={() => executeDelete("reparent")}
+                    className="px-4 py-2 rounded text-sm bg-red-600 text-white hover:bg-red-700"
+                  >
+                    Löschen
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Schritt 2: Bestätigung für "Alles löschen" mit Texteingabe */}
+            {deleteStep === "confirm-all" && (
+              <>
+                <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2 mb-3">
+                  <strong>Achtung:</strong> Du bist dabei, <strong>{deleteTarget.title}</strong> und
+                  alle <strong>{deleteTarget.childCount}</strong> Unternotizen unwiderruflich zu löschen.
+                </p>
+                <p className="text-sm text-slate-700 mb-2">
+                  Bitte tippe <strong className="font-mono">Löschen</strong> zur Bestätigung:
+                </p>
+                <input
+                  type="text"
+                  value={confirmInput}
+                  onChange={(e) => setConfirmInput(e.target.value)}
+                  className="w-full border rounded px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-300"
+                  placeholder="Löschen"
+                  autoFocus
+                />
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setDeleteStep("choose")}
+                    className="px-4 py-2 rounded text-sm border hover:bg-slate-50"
+                  >
+                    Zurück
+                  </button>
+                  <button
+                    onClick={() => executeDelete("all")}
+                    disabled={confirmInput !== "Löschen"}
+                    className="px-4 py-2 rounded text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Alle löschen
+                  </button>
+                </div>
+              </>
             )}
           </div>
         </div>
