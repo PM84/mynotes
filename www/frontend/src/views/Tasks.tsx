@@ -1,10 +1,10 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
+import { DragDropContext, Droppable, Draggable, type DropResult, type DraggableProvidedDragHandleProps } from "@hello-pangea/dnd";
 import { type LocalTask } from "../db";
 import { upsertTaskLocal, deleteTaskLocal, listLocalTasks } from "../sync";
 import { api } from "../api";
-import { Plus, Trash2, Link as LinkIcon, GripVertical, X, Eye, EyeOff, Settings2, Pencil, Check } from "lucide-react";
+import { Plus, Trash2, Link as LinkIcon, GripVertical, X, Eye, EyeOff, Settings2, Pencil, Check, GripHorizontal } from "lucide-react";
 import { Link } from "react-router-dom";
 import { v4 as uuid } from "uuid";
 
@@ -67,9 +67,18 @@ export function Tasks() {
 
   const onDragEnd = useCallback(
     (result: DropResult) => {
-      const { source, destination } = result;
+      const { source, destination, type } = result;
       if (!destination) return;
       if (source.droppableId === destination.droppableId && source.index === destination.index) return;
+
+      // Column reorder
+      if (type === "COLUMN") {
+        const reordered = [...columns];
+        const [moved] = reordered.splice(source.index, 1);
+        reordered.splice(destination.index, 0, moved);
+        void saveColumns(reordered);
+        return;
+      }
 
       const srcCol = source.droppableId;
       const dstCol = destination.droppableId;
@@ -108,7 +117,7 @@ export function Tasks() {
         }
       }
     },
-    [groupedTasks, columns]
+    [groupedTasks, columns, saveColumns]
   );
 
   const addColumn = () => {
@@ -163,28 +172,52 @@ export function Tasks() {
       </div>
       <div className="flex-1 min-h-0 overflow-x-auto">
         <DragDropContext onDragEnd={onDragEnd}>
-          <div className="flex gap-4 p-4 h-full min-w-max">
-            {columns.map((col) => (
-              <KanbanColumnView
-                key={col.id}
-                col={col}
-                tasks={groupedTasks[col.id] ?? []}
-                editing={editingColumns}
-                allTags={allTags}
-                onUpdate={(patch) => updateColumn(col.id, patch)}
-                onRemove={() => removeColumn(col.id)}
-                canRemove={columns.length > 1}
-              />
-            ))}
-            {editingColumns && (
-              <button
-                onClick={addColumn}
-                className="w-72 flex-shrink-0 rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-400 hover:border-slate-400 hover:text-slate-500 transition-colors"
+          <Droppable droppableId="board-columns" type="COLUMN" direction="horizontal">
+            {(boardProvided) => (
+              <div
+                ref={boardProvided.innerRef}
+                {...boardProvided.droppableProps}
+                className="flex gap-4 p-4 h-full min-w-max"
               >
-                <Plus size={20} className="mr-1" /> Spalte hinzufügen
-              </button>
+                {columns.map((col, colIndex) => (
+                  <Draggable
+                    key={col.id}
+                    draggableId={`col-drag-${col.id}`}
+                    index={colIndex}
+                    isDragDisabled={!editingColumns}
+                  >
+                    {(colDragProvided, colDragSnapshot) => (
+                      <div
+                        ref={colDragProvided.innerRef}
+                        {...colDragProvided.draggableProps}
+                        className={colDragSnapshot.isDragging ? "opacity-80" : ""}
+                      >
+                        <KanbanColumnView
+                          col={col}
+                          tasks={groupedTasks[col.id] ?? []}
+                          editing={editingColumns}
+                          allTags={allTags}
+                          onUpdate={(patch) => updateColumn(col.id, patch)}
+                          onRemove={() => removeColumn(col.id)}
+                          canRemove={columns.length > 1}
+                          dragHandleProps={colDragProvided.dragHandleProps}
+                        />
+                      </div>
+                    )}
+                  </Draggable>
+                ))}
+                {boardProvided.placeholder}
+                {editingColumns && (
+                  <button
+                    onClick={addColumn}
+                    className="w-72 flex-shrink-0 rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-400 hover:border-slate-400 hover:text-slate-500 transition-colors"
+                  >
+                    <Plus size={20} className="mr-1" /> Spalte hinzufügen
+                  </button>
+                )}
+              </div>
             )}
-          </div>
+          </Droppable>
         </DragDropContext>
       </div>
     </div>
@@ -199,6 +232,7 @@ function KanbanColumnView({
   onUpdate,
   onRemove,
   canRemove,
+  dragHandleProps,
 }: {
   col: KanbanColumn;
   tasks: LocalTask[];
@@ -207,6 +241,7 @@ function KanbanColumnView({
   onUpdate: (patch: Partial<KanbanColumn>) => void;
   onRemove: () => void;
   canRemove: boolean;
+  dragHandleProps: DraggableProvidedDragHandleProps | null | undefined;
 }) {
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
@@ -235,6 +270,11 @@ function KanbanColumnView({
   return (
     <div className={`w-72 flex-shrink-0 rounded-lg ${col.color} flex flex-col max-h-full`}>
       <div className="px-3 py-2 font-medium text-sm flex items-center justify-between gap-1">
+        {editing && (
+          <div {...dragHandleProps} className="cursor-grab mr-1 text-slate-400 hover:text-slate-600">
+            <GripHorizontal size={14} />
+          </div>
+        )}
         {editTitle ? (
           <input
             autoFocus
@@ -289,7 +329,7 @@ function KanbanColumnView({
           ))}
         </div>
       )}
-      <Droppable droppableId={col.id}>
+      <Droppable droppableId={col.id} type="TASK">
         {(provided, snapshot) => (
           <div
             ref={provided.innerRef}
