@@ -7,7 +7,7 @@ import { v4 as uuid } from "uuid";
 import { sendLive, subscribeLive } from "../realtime";
 import { apiJson } from "../api";
 import { toast } from "sonner";
-import { ArrowLeft, CheckSquare, Columns, FileText, FolderInput, Image as ImageIcon, ListChecks, Loader2, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, ScrollText, Send, Sparkles, Tag, X } from "lucide-react";
+import { ArrowLeft, CheckSquare, ChevronDown, Columns, FileText, FolderInput, Image as ImageIcon, ListChecks, Loader2, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, ScrollText, Send, Sparkles, Tag, X } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = lazy(() =>
@@ -48,6 +48,12 @@ export function NoteEditor() {
     setBody(note.body_md ?? "");
     setTags((note.tags ?? []).join(", "));
     excaliRef.current = note.excalidraw ?? null;
+    lastSavedRef.current = {
+      title: note.title,
+      body: note.body_md ?? "",
+      tags: (note.tags ?? []).join(","),
+      excalidraw: note.excalidraw ?? null,
+    };
     hydratedRef.current = true;
   }, [note?.id]);
 
@@ -113,14 +119,32 @@ export function NoteEditor() {
   useEffect(() => { bodyRef.current = body; }, [body]);
   useEffect(() => { tagsRef.current = tags; }, [tags]);
 
+  // Snapshot of last-saved values to avoid creating pending ops when nothing changed.
+  const lastSavedRef = useRef<{ title: string; body: string; tags: string; excalidraw: any } | null>(null);
+
   const save = useCallback(async () => {
     if (!id) return;
+    const curTitle = titleRef.current;
+    const curBody = bodyRef.current;
+    const curTags = tagsRef.current.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean).join(",");
+    const curExcali = excaliRef.current;
+
+    const last = lastSavedRef.current;
+    if (last
+      && last.title === curTitle
+      && last.body === curBody
+      && last.tags === curTags
+      && last.excalidraw === curExcali
+    ) {
+      return; // nothing changed
+    }
+    lastSavedRef.current = { title: curTitle, body: curBody, tags: curTags, excalidraw: curExcali };
     await upsertNoteLocal({
       id,
-      title: titleRef.current,
-      body_md: bodyRef.current,
-      tags: tagsRef.current.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean),
-      excalidraw: excaliRef.current,
+      title: curTitle,
+      body_md: curBody,
+      tags: curTags.split(",").filter(Boolean),
+      excalidraw: curExcali,
     });
   }, [id]);
 
@@ -231,6 +255,8 @@ export function NoteEditor() {
   const [busy, setBusy] = useState<string | null>(null);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [canvasMode, setCanvasMode] = useState<"transcribe" | "summary" | "elaborate" | "cleanup" | "memo">("transcribe");
+  const [aiMenuOpen, setAiMenuOpen] = useState(false);
+  const aiMenuRef = useRef<HTMLDivElement>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // --- Verschieben-Dialog ---
@@ -245,6 +271,18 @@ export function NoteEditor() {
   const [emailRecipient, setEmailRecipient] = useState("");
   const [recentEmails, setRecentEmails] = useState<string[]>([]);
   const [emailSending, setEmailSending] = useState(false);
+
+  // --- AI-Menü schließen bei Klick außerhalb ---
+  useEffect(() => {
+    if (!aiMenuOpen) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (aiMenuRef.current && !aiMenuRef.current.contains(e.target as Node)) {
+        setAiMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [aiMenuOpen]);
 
   // --- Memo-Existenz prüfen ---
   const [hasMemo, setHasMemo] = useState(false);
@@ -510,35 +548,55 @@ export function NoteEditor() {
         >
           {busy === "tag" ? <Loader2 size={18} className="animate-spin" /> : <Tag size={18} />}
         </button>
-        <button
-          onClick={summarize}
-          disabled={busy !== null || !navigator.onLine}
-          className="p-1 hover:bg-slate-100 rounded disabled:opacity-30"
-          title="KI-Zusammenfassung"
-        >
-          {busy === "sum" ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-        </button>
-        <div className="flex items-center border rounded" title="KI-Aktionen">
-          <select
-            value={canvasMode}
-            onChange={(e) => setCanvasMode(e.target.value as any)}
-            className="text-xs px-1 py-1 outline-none bg-transparent"
-            disabled={busy !== null}
-          >
-            <option value="transcribe">Transkript</option>
-            <option value="summary">Zusammenfassung</option>
-            <option value="elaborate">Ausarbeitung</option>
-            <option value="cleanup">Bereinigen</option>
-            <option value="memo">Memo erstellen</option>
-          </select>
+        {/* KI-Dropdown */}
+        <div className="relative" ref={aiMenuRef}>
           <button
-            onClick={canvasMode === "memo" ? generateMemo : canvasToMarkdown}
+            onClick={() => setAiMenuOpen((o) => !o)}
             disabled={busy !== null || !navigator.onLine}
-            className="p-1 hover:bg-slate-100 disabled:opacity-30 border-l"
-            title={canvasMode === "memo" ? "Aktennotiz erstellen" : "Canvas in Markdown einfügen"}
+            className="flex items-center gap-0.5 p-1 hover:bg-slate-100 rounded disabled:opacity-30"
+            title="KI-Aktionen"
           >
-            {busy === "canvas" || busy === "memo" ? <Loader2 size={18} className="animate-spin" /> : <ScanLine size={18} />}
+            {busy ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+            <ChevronDown size={14} />
           </button>
+          {aiMenuOpen && (
+            <div className="absolute right-0 top-full mt-1 w-56 bg-white border rounded-lg shadow-lg z-50 py-1 text-sm">
+              <button
+                onClick={() => { setAiMenuOpen(false); summarize(); }}
+                className="w-full text-left px-3 py-2 hover:bg-slate-100 flex items-center gap-2"
+              >
+                <Sparkles size={16} /> Zusammenfassung
+              </button>
+              <div className="border-t my-1" />
+              <div className="px-3 py-1 text-xs text-slate-400 font-medium">Canvas-Aktion</div>
+              <div className="px-3 py-1.5">
+                <select
+                  value={canvasMode}
+                  onChange={(e) => setCanvasMode(e.target.value as any)}
+                  className="w-full text-sm px-2 py-1 border rounded bg-white"
+                >
+                  <option value="transcribe">Transkript</option>
+                  <option value="summary">Zusammenfassung</option>
+                  <option value="elaborate">Ausarbeitung</option>
+                  <option value="cleanup">Bereinigen</option>
+                  <option value="memo">Memo erstellen</option>
+                </select>
+              </div>
+              <button
+                onClick={() => { setAiMenuOpen(false); canvasMode === "memo" ? generateMemo() : canvasToMarkdown(); }}
+                className="w-full text-left px-3 py-2 hover:bg-slate-100 flex items-center gap-2"
+              >
+                <ScanLine size={16} /> {canvasMode === "memo" ? "Aktennotiz erstellen" : "Canvas verarbeiten"}
+              </button>
+              <div className="border-t my-1" />
+              <button
+                onClick={() => { setAiMenuOpen(false); extractTasks(); }}
+                className="w-full text-left px-3 py-2 hover:bg-slate-100 flex items-center gap-2"
+              >
+                <ListChecks size={16} /> Aufgaben extrahieren
+              </button>
+            </div>
+          )}
         </div>
         <button onClick={save} className="p-1 hover:bg-slate-100 rounded" title="Jetzt speichern">
           <Save size={18} />
@@ -560,14 +618,6 @@ export function NoteEditor() {
           title="Aufgabe aus Notiz erstellen"
         >
           <CheckSquare size={18} />
-        </button>
-        <button
-          onClick={extractTasks}
-          disabled={busy !== null || !navigator.onLine}
-          className="p-1 hover:bg-slate-100 rounded disabled:opacity-30"
-          title="Aufgaben per KI aus Notiz extrahieren"
-        >
-          {busy === "extract" ? <Loader2 size={18} className="animate-spin" /> : <ListChecks size={18} />}
         </button>
         <div className="flex items-center border rounded" role="group" aria-label="Ansicht">
           <button
