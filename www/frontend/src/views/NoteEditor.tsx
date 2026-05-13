@@ -52,7 +52,7 @@ export function NoteEditor() {
       title: note.title,
       body: note.body_md ?? "",
       tags: (note.tags ?? []).join(","),
-      excalidraw: note.excalidraw ?? null,
+      excaliElements: excaliDigest(note.excalidraw ?? null),
     };
     hydratedRef.current = true;
   }, [note?.id]);
@@ -120,7 +120,18 @@ export function NoteEditor() {
   useEffect(() => { tagsRef.current = tags; }, [tags]);
 
   // Snapshot of last-saved values to avoid creating pending ops when nothing changed.
-  const lastSavedRef = useRef<{ title: string; body: string; tags: string; excalidraw: any } | null>(null);
+  const lastSavedRef = useRef<{ title: string; body: string; tags: string; excaliElements: string } | null>(null);
+
+  /** Stabile Kurzform der Excalidraw-Elemente für Dirty-Check. */
+  const excaliDigest = (scene: any): string => {
+    const els = scene?.elements;
+    if (!els || !els.length) return "";
+    // Jedes Element hat einen version-Counter – die Summe ist ein schneller
+    // Fingerprint, der billiger als JSON.stringify ist.
+    let s = els.length.toString();
+    for (const e of els) s += "," + (e.id ?? "") + ":" + (e.version ?? 0) + (e.isDeleted ? "d" : "");
+    return s;
+  };
 
   const save = useCallback(async () => {
     if (!id) return;
@@ -128,17 +139,18 @@ export function NoteEditor() {
     const curBody = bodyRef.current;
     const curTags = tagsRef.current.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean).join(",");
     const curExcali = excaliRef.current;
+    const curDigest = excaliDigest(curExcali);
 
     const last = lastSavedRef.current;
     if (last
       && last.title === curTitle
       && last.body === curBody
       && last.tags === curTags
-      && last.excalidraw === curExcali
+      && last.excaliElements === curDigest
     ) {
       return; // nothing changed
     }
-    lastSavedRef.current = { title: curTitle, body: curBody, tags: curTags, excalidraw: curExcali };
+    lastSavedRef.current = { title: curTitle, body: curBody, tags: curTags, excaliElements: curDigest };
     await upsertNoteLocal({
       id,
       title: curTitle,

@@ -355,27 +355,24 @@ export async function trySync() {
           }
           for (const id of ids) await db.pending.delete(id);
         } else if (r.ok) {
-          // Erfolg – lokalen State aktualisieren
+          // Erfolg – Pending-Ops entfernen, dirty bleibt 1.
+          // pullAll wird dirty auf 0 setzen, sobald der Server die Daten
+          // bestätigt hat. So gibt es keine Race-Condition zwischen
+          // trySync und pullAll, die zum Löschen der Notiz führen könnte.
           for (const id of ids) await db.pending.delete(id);
           if (op.type === "note.upsert" && r.data) {
             const n = await db.notes.get(op.payload.id);
             if (n) {
               if (r.data.created_at) n.created_at = r.data.created_at;
               if (r.data.updated_at) n.updated_at = r.data.updated_at;
-              const remaining = await db.pending
-                .filter((p) => p.type === "note.upsert" && p.payload?.id === op.payload.id)
-                .count();
-              n.dirty = remaining > 0 ? 1 : 0;
+              // dirty bleibt 1 – pullAll klärt das
               await db.notes.put(n);
             }
           } else if (op.type === "task.upsert" && r.data) {
             const t = await db.tasks.get(op.payload.id);
             if (t) {
               if (r.data.updated_at) t.updated_at = r.data.updated_at;
-              const remaining = await db.pending
-                .filter((p) => p.type === "task.upsert" && p.payload?.id === op.payload.id)
-                .count();
-              t.dirty = remaining > 0 ? 1 : 0;
+              // dirty bleibt 1 – pullAll klärt das
               await db.tasks.put(t);
             }
           } else if (op.type === "note.delete") {
@@ -392,6 +389,9 @@ export async function trySync() {
     syncing = false;
     notify();
   }
+  // Nach erfolgreichem Push: Pull starten, damit pullAll die dirty-Flags
+  // auf 0 setzen kann und der Server-Zustand konsistent übernommen wird.
+  void pullAll();
 }
 
 let conflictHandler: ((id: string, server: ServerNote) => void) | null = null;
@@ -436,14 +436,8 @@ async function runOp(op: PendingOp) {
     if (n) {
       if (serverOut?.created_at) n.created_at = serverOut.created_at;
       if (serverOut?.updated_at) n.updated_at = serverOut.updated_at;
-      // dirty erst auf 0 setzen, wenn KEINE weiteren Pending-Ops für diese
-      // Notiz existieren. Sonst löscht/überschreibt ein paralleler pullAll
-      // die lokale Notiz, obwohl noch Änderungen ausstehen (Race-Condition
-      // zwischen trySync und pullAll beim Online-Event).
-      const morePending = await db.pending
-        .filter((p) => p.type === "note.upsert" && p.payload?.id === op.payload.id)
-        .count();
-      n.dirty = morePending > 0 ? 1 : 0;
+      // dirty bleibt 1 – pullAll klärt das, sobald der Server die Daten
+      // bestätigt (verhindert Race-Condition mit parallelem pullAll).
       await db.notes.put(n);
     }
     // Nach erfolgreichem Push: client_updated_at in allen verbleibenden
@@ -529,10 +523,7 @@ async function runOp(op: PendingOp) {
     const t = await db.tasks.get(op.payload.id);
     if (t) {
       if (serverOut?.updated_at) t.updated_at = serverOut.updated_at;
-      const morePending = await db.pending
-        .filter((p) => p.type === "task.upsert" && p.payload?.id === op.payload.id)
-        .count();
-      t.dirty = morePending > 0 ? 1 : 0;
+      // dirty bleibt 1 – pullAll klärt das.
       await db.tasks.put(t);
     }
     if (serverOut?.updated_at) {
@@ -603,7 +594,7 @@ async function _pullAllImpl() {
   try {
     const remote = await api<ServerNote[]>("/notes?all=1&include_deleted=1");
     const remoteIds = new Set(remote.map((r) => r.id));
-    await db.transaction("rw", db.notes, async () => {
+    await db.transaction("rw", db.notes, db.pending, async () => {
       for (const r of remote) {
         const local = await db.notes.get(r.id);
         const isDeleted = !!r.deleted_at;
@@ -613,7 +604,43 @@ async function _pullAllImpl() {
           }
           continue;
         }
-        if (!local || (!local.dirty && r.updated_at > local.updated_at)) {
+        if (!local) {
+          await db.notes.put({
+            id: r.id,
+            parent_id: r.parent_id,
+            title: r.title,
+            body_md: r.body_md,
+            excalidraw: r.excalidraw,
+            ocr_text: r.ocr_text,
+            tags: r.tags,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+            dirty: 0,
+            deleted: 0,
+          });
+        } else if (local.dirty) {
+          // Lokal dirty – prüfen ob noch Pending-Ops existieren.
+          // Wenn nicht, wurde der Push erfolgreich abgeschlossen und wir
+          // können den Server-Stand übernehmen und dirty auf 0 setzen.
+          const hasPending = await db.pending
+            .filter((p) => (p.type === "note.upsert" || p.type === "note.delete") && p.payload?.id === r.id)
+            .count() > 0;
+          if (!hasPending) {
+            await db.notes.put({
+              id: r.id,
+              parent_id: r.parent_id,
+              title: r.title,
+              body_md: r.body_md,
+              excalidraw: r.excalidraw,
+              ocr_text: r.ocr_text,
+              tags: r.tags,
+              created_at: r.created_at,
+              updated_at: r.updated_at,
+              dirty: 0,
+              deleted: 0,
+            });
+          }
+        } else if (r.updated_at > local.updated_at) {
           await db.notes.put({
             id: r.id,
             parent_id: r.parent_id,
@@ -630,10 +657,16 @@ async function _pullAllImpl() {
         }
       }
       // Lokale Notes, die der Server gar nicht mehr kennt (weder aktiv noch
-      // deleted): bereinigen, sofern nicht dirty.
+      // deleted): bereinigen, sofern nicht dirty und keine Pending-Ops.
+      const pendingNoteIds = new Set(
+        (await db.pending.toArray())
+          .filter((p) => p.type.startsWith("note."))
+          .map((p) => p.payload?.id)
+          .filter(Boolean),
+      );
       const all = await db.notes.toArray();
       for (const local of all) {
-        if (!remoteIds.has(local.id) && !local.dirty) {
+        if (!remoteIds.has(local.id) && !local.dirty && !pendingNoteIds.has(local.id)) {
           await db.notes.delete(local.id);
         }
       }
@@ -650,7 +683,7 @@ async function pullTasks() {
   try {
     const remote = await api<ServerTask[]>("/tasks?include_deleted=1");
     const remoteIds = new Set(remote.map((r) => r.id));
-    await db.transaction("rw", db.tasks, async () => {
+    await db.transaction("rw", db.tasks, db.pending, async () => {
       for (const r of remote) {
         const local = await db.tasks.get(r.id);
         const isDeleted = !!r.deleted_at;
@@ -660,7 +693,44 @@ async function pullTasks() {
           }
           continue;
         }
-        if (!local || (!local.dirty && r.updated_at > local.updated_at)) {
+        if (!local) {
+          await db.tasks.put({
+            id: r.id,
+            note_id: r.note_id,
+            title: r.title,
+            description: r.description,
+            status: r.status as any,
+            priority: r.priority,
+            position: r.position,
+            due_date: r.due_date,
+            tags: r.tags ?? null,
+            closed_at: r.closed_at ?? null,
+            updated_at: r.updated_at,
+            dirty: 0,
+            deleted: 0,
+          });
+        } else if (local.dirty) {
+          const hasPending = await db.pending
+            .filter((p) => (p.type === "task.upsert" || p.type === "task.delete") && p.payload?.id === r.id)
+            .count() > 0;
+          if (!hasPending) {
+            await db.tasks.put({
+              id: r.id,
+              note_id: r.note_id,
+              title: r.title,
+              description: r.description,
+              status: r.status as any,
+              priority: r.priority,
+              position: r.position,
+              due_date: r.due_date,
+              tags: r.tags ?? null,
+              closed_at: r.closed_at ?? null,
+              updated_at: r.updated_at,
+              dirty: 0,
+              deleted: 0,
+            });
+          }
+        } else if (r.updated_at > local.updated_at) {
           await db.tasks.put({
             id: r.id,
             note_id: r.note_id,
@@ -678,9 +748,15 @@ async function pullTasks() {
           });
         }
       }
+      const pendingTaskIds = new Set(
+        (await db.pending.toArray())
+          .filter((p) => p.type.startsWith("task."))
+          .map((p) => p.payload?.id)
+          .filter(Boolean),
+      );
       const all = await db.tasks.toArray();
       for (const local of all) {
-        if (!remoteIds.has(local.id) && !local.dirty) {
+        if (!remoteIds.has(local.id) && !local.dirty && !pendingTaskIds.has(local.id)) {
           await db.tasks.delete(local.id);
         }
       }
