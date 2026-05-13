@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db";
-import { deleteNoteLocal, upsertNoteLocal } from "../sync";
+import { deleteNoteLocal, deleteNoteRecursive, getChildren, reparentChildren, upsertNoteLocal } from "../sync";
 import { apiJson } from "../api";
 import { toast } from "sonner";
-import { CheckSquare, FolderTree, Loader2, Plus, Sparkles, Square, Trash2, X } from "lucide-react";
+import { AlertTriangle, CheckSquare, FolderTree, Loader2, Plus, Sparkles, Square, Trash2, X } from "lucide-react";
 
 export function Notes() {
   const [params, setParams] = useSearchParams();
@@ -37,6 +37,32 @@ export function Notes() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [contradictions, setContradictions] = useState<string | null>(null);
+
+  // Delete-Bestätigungsdialog
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; childCount: number } | null>(null);
+
+  async function requestDelete(id: string, title: string) {
+    const children = await getChildren(id);
+    if (children.length === 0) {
+      // Keine Kinder → einfache Bestätigung
+      setDeleteTarget({ id, title, childCount: 0 });
+    } else {
+      setDeleteTarget({ id, title, childCount: children.length });
+    }
+  }
+
+  async function confirmDelete(mode: "single" | "all" | "reparent") {
+    if (!deleteTarget) return;
+    if (mode === "reparent") {
+      await reparentChildren(deleteTarget.id);
+      await deleteNoteLocal(deleteTarget.id);
+    } else if (mode === "all") {
+      await deleteNoteRecursive(deleteTarget.id);
+    } else {
+      await deleteNoteLocal(deleteTarget.id);
+    }
+    setDeleteTarget(null);
+  }
 
   function toggle(id: string) {
     const next = new Set(selected);
@@ -167,7 +193,7 @@ export function Notes() {
                   <FolderTree size={16} />
                 </button>
                 <button
-                  onClick={() => deleteNoteLocal(n.id)}
+                  onClick={() => requestDelete(n.id, n.title || "(ohne Titel)")}
                   className="px-3 py-2 text-slate-500 hover:text-red-600"
                   title="Löschen"
                 >
@@ -181,6 +207,70 @@ export function Notes() {
           <li className="text-slate-500 text-center py-12">Keine Notizen. Erstelle die erste.</li>
         )}
       </ul>
+
+      {/* Lösch-Bestätigungsdialog */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-5">
+            <div className="flex items-center gap-2 text-red-600 mb-3">
+              <AlertTriangle size={20} />
+              <h3 className="font-semibold text-lg">Notiz löschen</h3>
+            </div>
+            <p className="text-sm text-slate-700 mb-4">
+              Möchtest du <strong>{deleteTarget.title}</strong> wirklich löschen?
+            </p>
+            {deleteTarget.childCount > 0 ? (
+              <>
+                <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-4">
+                  Diese Notiz hat <strong>{deleteTarget.childCount}</strong> untergeordnete{" "}
+                  {deleteTarget.childCount === 1 ? "Notiz" : "Notizen"}.
+                </p>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => confirmDelete("reparent")}
+                    className="w-full px-4 py-2 rounded text-sm bg-slate-100 hover:bg-slate-200 text-left"
+                  >
+                    <strong>Nur diese Notiz löschen</strong>
+                    <span className="block text-xs text-slate-500">
+                      Unternotizen werden eine Ebene höher verschoben
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => confirmDelete("all")}
+                    className="w-full px-4 py-2 rounded text-sm bg-red-50 hover:bg-red-100 text-red-700 text-left"
+                  >
+                    <strong>Alles löschen</strong>
+                    <span className="block text-xs text-red-500">
+                      Diese Notiz und alle {deleteTarget.childCount} Unternotizen
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setDeleteTarget(null)}
+                    className="w-full px-4 py-2 rounded text-sm border hover:bg-slate-50"
+                  >
+                    Abbrechen
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setDeleteTarget(null)}
+                  className="px-4 py-2 rounded text-sm border hover:bg-slate-50"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  onClick={() => confirmDelete("single")}
+                  className="px-4 py-2 rounded text-sm bg-red-600 text-white hover:bg-red-700"
+                >
+                  Löschen
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
