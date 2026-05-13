@@ -399,7 +399,8 @@ async def _single_note_text(session: AsyncSession, note_id: uuid.UUID) -> str:
     n = await session.get(Note, note_id.bytes)
     if not n:
         raise HTTPException(404, "note not found")
-    return f"### {n.title}\n{n.body_md or ''}\n{n.ocr_text or ''}"
+    created = n.created_at.strftime("%d.%m.%Y") if n.created_at else "unbekannt"
+    return f"### {n.title}\nErstellt am: {created}\n{n.body_md or ''}\n{n.ocr_text or ''}"
 
 
 @router.post("/memo")

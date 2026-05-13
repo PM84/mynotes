@@ -591,8 +591,11 @@ export function NoteEditor() {
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Titel der Notiz…"
           aria-label="Titel"
-        />
-        <button
+        />        {note.created_at && (
+          <span className="text-xs text-slate-400 whitespace-nowrap mr-2" title="Erstellt am">
+            {new Date(note.created_at).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}
+          </span>
+        )}        <button
           onClick={() => setFullscreen((v) => !v)}
           className="p-2 mr-2 hover:bg-slate-100 rounded text-slate-600"
           title={fullscreen ? "Normalansicht (Esc)" : "Vollbild"}

@@ -9,6 +9,7 @@ export type LocalNote = {
   ocr_text: string | null;
   tags: string[] | null;
   asset_ids?: string[] | null;
+  created_at?: string; // ISO – set by server, read-only
   updated_at: string; // ISO
   dirty?: 0 | 1; // unsynced changes
   deleted?: 0 | 1;

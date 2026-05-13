@@ -58,6 +58,7 @@ export async function upsertNoteLocal(input: Partial<LocalNote> & { id?: string 
     ocr_text: existing?.ocr_text ?? null,
     tags: input.tags ?? existing?.tags ?? null,
     asset_ids: input.asset_ids ?? existing?.asset_ids ?? null,
+    created_at: existing?.created_at,
     updated_at: now(),
     dirty: 1,
     deleted: 0,
@@ -336,6 +337,7 @@ export async function trySync() {
               id: s.id, parent_id: s.parent_id, title: s.title,
               body_md: s.body_md, excalidraw: s.excalidraw,
               ocr_text: s.ocr_text, tags: s.tags,
+              created_at: s.created_at,
               updated_at: s.updated_at, dirty: 0,
               deleted: s.deleted_at ? 1 : 0,
             });
@@ -358,6 +360,7 @@ export async function trySync() {
           if (op.type === "note.upsert" && r.data) {
             const n = await db.notes.get(op.payload.id);
             if (n) {
+              if (r.data.created_at) n.created_at = r.data.created_at;
               if (r.data.updated_at) n.updated_at = r.data.updated_at;
               const remaining = await db.pending
                 .filter((p) => p.type === "note.upsert" && p.payload?.id === op.payload.id)
@@ -418,6 +421,7 @@ async function runOp(op: PendingOp) {
             excalidraw: server.excalidraw,
             ocr_text: server.ocr_text,
             tags: server.tags,
+            created_at: server.created_at,
             updated_at: server.updated_at,
             dirty: 0,
             deleted: server.deleted_at ? 1 : 0,
@@ -430,6 +434,7 @@ async function runOp(op: PendingOp) {
     }
     const n = await db.notes.get(op.payload.id);
     if (n) {
+      if (serverOut?.created_at) n.created_at = serverOut.created_at;
       if (serverOut?.updated_at) n.updated_at = serverOut.updated_at;
       // dirty erst auf 0 setzen, wenn KEINE weiteren Pending-Ops für diese
       // Notiz existieren. Sonst löscht/überschreibt ein paralleler pullAll
@@ -617,6 +622,7 @@ async function _pullAllImpl() {
             excalidraw: r.excalidraw,
             ocr_text: r.ocr_text,
             tags: r.tags,
+            created_at: r.created_at,
             updated_at: r.updated_at,
             dirty: 0,
             deleted: 0,

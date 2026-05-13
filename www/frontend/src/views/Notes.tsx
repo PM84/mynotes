@@ -188,6 +188,9 @@ export function Notes() {
             >
               <div className="font-medium">{n.title || "(ohne Titel)"}</div>
               <div className="text-xs text-slate-500">
+                {n.created_at && (
+                  <span className="mr-2">{new Date(n.created_at).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}</span>
+                )}
                 {n.tags?.join(" · ")}
                 {n.dirty ? <span className="ml-2 text-amber-600">• unsynchronisiert</span> : null}
               </div>
