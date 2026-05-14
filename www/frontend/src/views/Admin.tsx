@@ -79,7 +79,7 @@ export function Admin() {
       setBackendVersion("?");
     }
     try {
-      const s = await api<{ session_lifetime_minutes: number; auto_close_days: number; smtp_host: string; smtp_port: number; smtp_user: string; smtp_password: string; smtp_from: string; smtp_use_tls: boolean; backup_enabled: boolean; backup_retention_days: number; nextcloud_url: string; nextcloud_user: string; nextcloud_password: string; nextcloud_backup_path: string }>("/admin/settings");
+      const s = await api<{ session_lifetime_minutes: number; auto_close_days: number; smtp_host: string; smtp_port: number; smtp_user: string; smtp_password: string; smtp_from: string; smtp_use_tls: boolean; backup_enabled: boolean; backup_retention_days: number; nextcloud_url: string; nextcloud_user: string; nextcloud_password: string; nextcloud_backup_path: string; backup_last_success: string; backup_last_error: string }>("/admin/settings");
       setSessionMinutes(s.session_lifetime_minutes);
       setSessionMinutesInput(String(s.session_lifetime_minutes));
       setAutoCloseDays(s.auto_close_days);
