@@ -13,7 +13,7 @@ from sqlalchemy import select, update
 from .ai.embedding import reembed_note
 from .ai.prompt_loader import load
 from .ai.registry import get_active
-from .app_settings import get_setting
+from .app_settings import get_setting, set_setting
 from .config import get_settings
 from .db import SessionLocal
 from .models import Asset, Note, NoteAsset, PendingJob, Task
@@ -95,8 +95,16 @@ async def _daily_backup() -> None:
             return
         await run_daily_backup(nc_url, nc_user, nc_password, nc_path, retention)
         log.info("daily backup to Nextcloud complete")
+        async with SessionLocal() as s:
+            await set_setting(s, "backup_last_success", now.isoformat())
+            await set_setting(s, "backup_last_error", "")
     except Exception as e:
         log.warning("daily_backup error: %s", e)
+        try:
+            async with SessionLocal() as s:
+                await set_setting(s, "backup_last_error", f"{now.isoformat()}|{e}")
+        except Exception:
+            pass
 
 
 async def _auto_close_tasks() -> None:

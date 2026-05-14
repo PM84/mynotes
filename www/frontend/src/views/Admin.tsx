@@ -63,6 +63,9 @@ export function Admin() {
   const [smtp, setSmtp] = useState({ host: "", port: "587", user: "", password: "", from: "", use_tls: true });
   const [users, setUsers] = useState<UserRow[]>([]);
   const [backup, setBackup] = useState({ enabled: false, retention_days: "7", nextcloud_url: "", nextcloud_user: "", nextcloud_password: "", nextcloud_backup_path: "/mynotes-backups" });
+  const [backupLastSuccess, setBackupLastSuccess] = useState<string>("");
+  const [backupLastError, setBackupLastError] = useState<string>("");
+  const [backupErrorOpen, setBackupErrorOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<{ id?: string; email: string; password: string; role: string } | null>(null);
 
   async function reload() {
@@ -83,6 +86,8 @@ export function Admin() {
       setAutoCloseDaysInput(String(s.auto_close_days));
       setSmtp({ host: s.smtp_host || "", port: String(s.smtp_port || 587), user: s.smtp_user || "", password: s.smtp_password || "", from: s.smtp_from || "", use_tls: s.smtp_use_tls ?? true });
       setBackup({ enabled: !!s.backup_enabled, retention_days: String(s.backup_retention_days ?? 7), nextcloud_url: s.nextcloud_url || "", nextcloud_user: s.nextcloud_user || "", nextcloud_password: s.nextcloud_password || "", nextcloud_backup_path: s.nextcloud_backup_path || "/mynotes-backups" });
+      setBackupLastSuccess(s.backup_last_success || "");
+      setBackupLastError(s.backup_last_error || "");
     } catch {
       // optional
     }
@@ -558,6 +563,38 @@ export function Admin() {
           </div>
         </div>
         <button onClick={saveBackup} className="mt-3 px-3 py-1 bg-slate-900 text-white rounded">Speichern</button>
+
+        {/* Backup-Status */}
+        {backup.enabled && (
+          <div className="mt-4 text-sm space-y-1">
+            {backupLastSuccess ? (
+              <p className="text-green-700">
+                ✓ Letztes erfolgreiches Backup: {new Date(backupLastSuccess).toLocaleString()}
+              </p>
+            ) : (
+              <p className="text-slate-500">Noch kein erfolgreiches Backup durchgeführt.</p>
+            )}
+            {backupLastError && (() => {
+              const sep = backupLastError.indexOf("|");
+              const errTime = sep > 0 ? backupLastError.slice(0, sep) : "";
+              const errMsg = sep > 0 ? backupLastError.slice(sep + 1) : backupLastError;
+              return (
+                <div>
+                  <button
+                    onClick={() => setBackupErrorOpen(!backupErrorOpen)}
+                    className="text-red-600 hover:underline flex items-center gap-1"
+                  >
+                    <span>{backupErrorOpen ? "▾" : "▸"}</span>
+                    ✗ Fehler beim Backup{errTime ? ` (${new Date(errTime).toLocaleString()})` : ""}
+                  </button>
+                  {backupErrorOpen && (
+                    <pre className="mt-1 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-800 whitespace-pre-wrap">{errMsg}</pre>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </section>
 
       <section>

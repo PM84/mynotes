@@ -306,6 +306,8 @@ async def get_app_settings(session: AsyncSession = Depends(get_session)) -> dict
         "nextcloud_user": await get_setting(session, "nextcloud_user", ""),
         "nextcloud_password": await get_setting(session, "nextcloud_password", ""),
         "nextcloud_backup_path": await get_setting(session, "nextcloud_backup_path", "/mynotes-backups"),
+        "backup_last_success": await get_setting(session, "backup_last_success", ""),
+        "backup_last_error": await get_setting(session, "backup_last_error", ""),
     }
 
 
