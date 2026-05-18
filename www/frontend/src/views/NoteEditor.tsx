@@ -5,7 +5,7 @@ import { db } from "../db";
 import { storeAssetLocal, upsertNoteLocal, upsertTaskLocal } from "../sync";
 import { v4 as uuid } from "uuid";
 import { sendLive, subscribeLive } from "../realtime";
-import { apiJson } from "../api";
+import { apiJson, api } from "../api";
 import { toast } from "sonner";
 import { ArrowLeft, CheckSquare, ChevronDown, Columns, FileText, FolderInput, Image as ImageIcon, ListChecks, Loader2, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, ScrollText, Send, Sparkles, Tag, X } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
@@ -18,6 +18,14 @@ export function NoteEditor() {
   const { id } = useParams();
   const nav = useNavigate();
   const note = useLiveQuery(() => (id ? db.notes.get(id) : undefined), [id]);
+
+  // Default-Zoom aus den Admin-Einstellungen (einmalig geladen).
+  const [defaultZoom, setDefaultZoom] = useState<number>(0.9);
+  useEffect(() => {
+    api<{ excalidraw_default_zoom: number }>("/settings/public")
+      .then((s) => setDefaultZoom((s.excalidraw_default_zoom ?? 90) / 100))
+      .catch(() => {});
+  }, []);
 
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -92,8 +100,8 @@ export function NoteEditor() {
       // dem n\u00e4chsten Dexie-Roundtrip aktualisiert ist.
       const src = excaliRef.current ?? note?.excalidraw;
       const savedAppState = src?.appState ?? {};
-      // Default-Zoom auf 90 % absenken, gespeicherten Zoom beibehalten.
-      const zoom = savedAppState.zoom ?? { value: 0.9 };
+      // Default-Zoom aus Admin-Einstellungen, gespeicherten Zoom beibehalten.
+      const zoom = savedAppState.zoom ?? { value: defaultZoom };
       return {
         elements: src?.elements ?? [],
         appState: {
@@ -112,7 +120,7 @@ export function NoteEditor() {
       };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [note?.id, layout]
+    [note?.id, layout, defaultZoom]
   );
 
   // Refs auf aktuelle Form-Werte, damit save() nicht in Closures veraltet.

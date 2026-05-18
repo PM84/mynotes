@@ -308,6 +308,7 @@ async def get_app_settings(session: AsyncSession = Depends(get_session)) -> dict
         "nextcloud_backup_path": await get_setting(session, "nextcloud_backup_path", "/mynotes-backups"),
         "backup_last_success": await get_setting(session, "backup_last_success", ""),
         "backup_last_error": await get_setting(session, "backup_last_error", ""),
+        "excalidraw_default_zoom": int(await get_setting(session, "excalidraw_default_zoom", 90)),
     }
 
 
@@ -385,6 +386,16 @@ async def update_app_settings(
             val = str(payload[key])
             await set_setting(session, key, val)
             result[key] = val
+    if "excalidraw_default_zoom" in payload:
+        raw = payload["excalidraw_default_zoom"]
+        try:
+            z = int(raw)
+        except (TypeError, ValueError) as e:
+            raise HTTPException(400, "invalid excalidraw_default_zoom") from e
+        if z < 1 or z > 500:
+            raise HTTPException(400, "excalidraw_default_zoom out of range (1..500)")
+        await set_setting(session, "excalidraw_default_zoom", z)
+        result["excalidraw_default_zoom"] = z
     if not result:
         raise HTTPException(400, "no valid settings in payload")
     return result

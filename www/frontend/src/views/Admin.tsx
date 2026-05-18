@@ -59,6 +59,8 @@ export function Admin() {
   const [sessionMinutesInput, setSessionMinutesInput] = useState<string>("40320");
   const [autoCloseDays, setAutoCloseDays] = useState<number>(30);
   const [autoCloseDaysInput, setAutoCloseDaysInput] = useState<string>("30");
+  const [excalidrawZoom, setExcalidrawZoom] = useState<number>(90);
+  const [excalidrawZoomInput, setExcalidrawZoomInput] = useState<string>("90");
   const [backendVersion, setBackendVersion] = useState<string>("…");
   const [smtp, setSmtp] = useState({ host: "", port: "587", user: "", password: "", from: "", use_tls: true });
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -79,11 +81,13 @@ export function Admin() {
       setBackendVersion("?");
     }
     try {
-      const s = await api<{ session_lifetime_minutes: number; auto_close_days: number; smtp_host: string; smtp_port: number; smtp_user: string; smtp_password: string; smtp_from: string; smtp_use_tls: boolean; backup_enabled: boolean; backup_retention_days: number; nextcloud_url: string; nextcloud_user: string; nextcloud_password: string; nextcloud_backup_path: string; backup_last_success: string; backup_last_error: string }>("/admin/settings");
+      const s = await api<{ session_lifetime_minutes: number; auto_close_days: number; excalidraw_default_zoom: number; smtp_host: string; smtp_port: number; smtp_user: string; smtp_password: string; smtp_from: string; smtp_use_tls: boolean; backup_enabled: boolean; backup_retention_days: number; nextcloud_url: string; nextcloud_user: string; nextcloud_password: string; nextcloud_backup_path: string; backup_last_success: string; backup_last_error: string }>("/admin/settings");
       setSessionMinutes(s.session_lifetime_minutes);
       setSessionMinutesInput(String(s.session_lifetime_minutes));
       setAutoCloseDays(s.auto_close_days);
       setAutoCloseDaysInput(String(s.auto_close_days));
+      setExcalidrawZoom(s.excalidraw_default_zoom ?? 90);
+      setExcalidrawZoomInput(String(s.excalidraw_default_zoom ?? 90));
       setSmtp({ host: s.smtp_host || "", port: String(s.smtp_port || 587), user: s.smtp_user || "", password: s.smtp_password || "", from: s.smtp_from || "", use_tls: s.smtp_use_tls ?? true });
       setBackup({ enabled: !!s.backup_enabled, retention_days: String(s.backup_retention_days ?? 7), nextcloud_url: s.nextcloud_url || "", nextcloud_user: s.nextcloud_user || "", nextcloud_password: s.nextcloud_password || "", nextcloud_backup_path: s.nextcloud_backup_path || "/mynotes-backups" });
       setBackupLastSuccess(s.backup_last_success || "");
@@ -206,6 +210,26 @@ export function Admin() {
       setAutoCloseDays(r.auto_close_days);
       setAutoCloseDaysInput(String(r.auto_close_days));
       toast.success("Auto-Close gespeichert.");
+    } catch (e: any) {
+      toast.error("Fehler: " + e.message);
+    }
+  }
+
+  async function saveExcalidrawZoom() {
+    const z = parseInt(excalidrawZoomInput, 10);
+    if (!Number.isFinite(z)) {
+      toast.error("Bitte ganze Zahl in Prozent eingeben.");
+      return;
+    }
+    try {
+      const r = await apiJson<{ excalidraw_default_zoom: number }>(
+        "/admin/settings",
+        "PUT",
+        { excalidraw_default_zoom: z }
+      );
+      setExcalidrawZoom(r.excalidraw_default_zoom);
+      setExcalidrawZoomInput(String(r.excalidraw_default_zoom));
+      toast.success("Excalidraw-Zoom gespeichert.");
     } catch (e: any) {
       toast.error("Fehler: " + e.message);
     }
@@ -657,6 +681,35 @@ export function Admin() {
           </button>
           <span className="text-xs text-slate-400">
             aktuell: {autoCloseDays} Tage
+          </span>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold mb-3">Excalidraw Standard-Zoom</h2>
+        <p className="text-sm text-slate-600 mb-3">
+          Standard-Zoomfaktor für neue oder nicht gespeicherte Excalidraw-Canvases in Prozent.
+          Gespeicherte Notizen behalten ihren individuellen Zoom bei. Erlaubt: 1 – 500 %.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="number"
+            min={1}
+            max={500}
+            step={1}
+            className="border rounded px-2 py-1 w-32"
+            value={excalidrawZoomInput}
+            onChange={(e) => setExcalidrawZoomInput(e.target.value)}
+          />
+          <span className="text-sm text-slate-500">%</span>
+          <button
+            onClick={saveExcalidrawZoom}
+            className="px-3 py-1 bg-slate-900 text-white rounded"
+          >
+            Speichern
+          </button>
+          <span className="text-xs text-slate-400">
+            aktuell: {excalidrawZoom} %
           </span>
         </div>
       </section>

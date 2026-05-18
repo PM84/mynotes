@@ -13,6 +13,7 @@ from sqlalchemy import select, text
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .api import admin, ai as ai_routes, assets, auth, notes, search, sync, tasks, ws
+from .app_settings import get_setting
 from .config import get_settings
 from .db import SessionLocal
 from .models import User, Workspace
@@ -123,6 +124,14 @@ async def healthz_deep() -> dict:
     worker_ok = bool(task and not task.done())
     ok = db_ok and worker_ok
     return {"ok": ok, "db": db_ok, "worker": worker_ok}
+
+
+@app.get("/settings/public")
+async def public_settings() -> dict:
+    """Return settings needed by all authenticated users (no admin required)."""
+    async with SessionLocal() as session:
+        zoom = await get_setting(session, "excalidraw_default_zoom", 90)
+    return {"excalidraw_default_zoom": int(zoom)}
 
 
 app.include_router(auth.router)
