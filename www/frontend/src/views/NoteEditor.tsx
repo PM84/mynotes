@@ -7,7 +7,7 @@ import { v4 as uuid } from "uuid";
 import { sendLive, subscribeLive } from "../realtime";
 import { apiJson, api } from "../api";
 import { toast } from "sonner";
-import { ArrowLeft, CheckSquare, ChevronDown, Columns, FileText, FolderInput, Image as ImageIcon, ListChecks, Loader2, Maximize2, Minimize2, Paperclip, PencilLine, Save, ScanLine, ScrollText, Send, Sparkles, Tag, X } from "lucide-react";
+import { ArrowLeft, CheckSquare, ChevronDown, Columns, FileText, FolderInput, Image as ImageIcon, ListChecks, Loader2, Maximize2, Minimize2, Palette, Paperclip, PencilLine, Save, ScanLine, ScrollText, Send, Sparkles, Tag, X } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = lazy(() =>
@@ -74,6 +74,14 @@ export function NoteEditor() {
   useEffect(() => {
     localStorage.setItem("noteEditor.layout", layout);
   }, [layout]);
+
+  // Properties-Panel (Farbe/Stiftdicke) im Canvas ein-/ausblenden.
+  const [hideProps, setHideProps] = useState<boolean>(() => {
+    return localStorage.getItem("noteEditor.hideProps") === "1";
+  });
+  useEffect(() => {
+    localStorage.setItem("noteEditor.hideProps", hideProps ? "1" : "0");
+  }, [hideProps]);
 
   // Vollbildmodus: blendet Toolbar + Anhang-Leiste aus, Canvas/Markdown
   // bekommen die volle Höhe. Persistiert in localStorage.
@@ -672,6 +680,14 @@ export function NoteEditor() {
             <PencilLine size={18} />
           </button>
         </div>
+        <button
+          onClick={() => setHideProps((v) => !v)}
+          className={`p-1 rounded ${hideProps ? "bg-slate-200" : "hover:bg-slate-100"}`}
+          title={hideProps ? "Farbpalette einblenden" : "Farbpalette ausblenden"}
+          aria-pressed={hideProps}
+        >
+          <Palette size={18} />
+        </button>
       </div>
       )}
       {/* Prominente, inline editierbare Titelzeile direkt unter der Toolbar.
@@ -763,7 +779,7 @@ export function NoteEditor() {
         {layout !== "md" && (
           // Excalidraw key wechselt mit Layout, damit es bei Größenwechsel
           // sauber neu mountet (Canvas-Resize ist nicht responsive).
-          <div className={layout === "split" ? "w-1/2" : "w-full"}>
+          <div className={`${layout === "split" ? "w-1/2" : "w-full"} ${hideProps ? "excali-hide-props" : ""}`}>
             <Suspense fallback={<div className="p-4 text-slate-500">Excalidraw lädt…</div>}>
               <Excalidraw
                 key={layout}
