@@ -4,8 +4,7 @@
 
 html, body, #root { height: 100%; }
 
-/* Excalidraw Properties-Panel (Farbe/Stiftdicke/Opacity) und Zoom/Undo ausblenden */
-.excali-hide-props .excalidraw .App-menu_bottom,
-.excali-hide-props .excalidraw .App-menu_left {
+/* Excalidraw Properties-Panel (Farbe/Stiftdicke/Opacity) ausblenden */
+.excali-hide-props .excalidraw .App-menu__left {
   display: none !important;
 }
